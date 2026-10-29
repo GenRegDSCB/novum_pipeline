@@ -1,24 +1,36 @@
 #----- miRNAs (one query FASTA per target sample, joined by key) -----#
 queries:
-  escherichia_coli: Data/Raw/RNAs/GCF_000005845.2.fa
-  bacteroides_thetaiotaomicron: Data/Raw/RNAs/GCF_000011065.1.fa
-  lactobacillus_gasseri: Data/Raw/RNAs/GCF_000014425.1.fa
-  lactobacillus_reuteri: Data/Raw/RNAs/GCF_000016825.1.fa
-  akkermansia_muciniphila: Data/Raw/RNAs/GCF_000020225.1.fa
-  lactobacillus_rhamnosus: Data/Raw/RNAs/GCF_000026505.1.fa
-  candidatus_arthromitus: Data/Raw/RNAs/GCF_000284435.1.fa
-  fusobacterium_nucleatum: Data/Raw/RNAs/GCF_050920725.1.fa
+  dysosmobacter_welbionis: Data/Raw/RNAs/dysosmobacter_welbionis.fa
+  hydrogenoanaerobacterium_saccharovorans: Data/Raw/RNAs/hydrogenoanaerobacterium_saccharovorans.fa
+  oscillibacter_valericigenes: Data/Raw/RNAs/oscillibacter_valericigenes.fa
+  phocaeicola_coprocola: Data/Raw/RNAs/phocaeicola_coprocola.fa
+  phocea_massiliensis: Data/Raw/RNAs/phocea_massiliensis.fa
+  blautia_wexlerae: Data/Raw/RNAs/blautia_wexlerae.fa
+  lawsonibacter_asaccharolyticus: Data/Raw/RNAs/lawsonibacter_asaccharolyticus.fa
+  anaerotruncus_colihominis: Data/Raw/RNAs/anaerotruncus_colihominis.fa
+  fusobacterium_nucleatum: Data/Raw/RNAs/fusobacterium_nucleatum.fa
+  peptostreptococcus_stomatis: Data/Raw/RNAs/peptostreptococcus_stomatis.fa
+  phocaeicola_sartorii: Data/Raw/RNAs/phocaeicola_sartorii.fa
+  provencibacterium_massiliense: Data/Raw/RNAs/provencibacterium_massiliense.fa
+  wansuia_hejianensis: Data/Raw/RNAs/wansuia_hejianensis.fa
+  youxingia_wuxianensis: Data/Raw/RNAs/youxingia_wuxianensis.fa
 
 #----- Genomes, even more than one -----#
 targets:
-  escherichia_coli: Data/Raw/genomes/GCF_000005845.2_ASM584v2_cds_rna_from_genomic.fna
-  bacteroides_thetaiotaomicron: Data/Raw/genomes/GCF_000011065.1_ASM1106v1_cds_rna_from_genomic.fna
-  lactobacillus_gasseri: Data/Raw/genomes/GCF_000014425.1_ASM1442v1_cds_rna_from_genomic.fna
-  lactobacillus_reuteri: Data/Raw/genomes/GCF_000016825.1_ASM1682v1_cds_rna_from_genomic.fna
-  akkermansia_muciniphila: Data/Raw/genomes/GCF_000020225.1_ASM2022v1_cds_rna_from_genomic.fna
-  lactobacillus_rhamnosus: Data/Raw/genomes/GCF_000026505.1_ASM2650v1_cds_rna_from_genomic.fna
-  candidatus_arthromitus: Data/Raw/genomes/GCF_000284435.1_ASM28443v1_cds_rna_from_genomic.fna
-  fusobacterium_nucleatum: Data/Raw/genomes/GCF_050920725.1_Fn10953_cds_rna_from_genomic.fna
+  dysosmobacter_welbionis: Data/Raw/genomes/GCF_965585535.1_J115_assembly_cds_rna_from_genomic.fna
+  hydrogenoanaerobacterium_saccharovorans: Data/Raw/genomes/GCF_003814745.1_ASM381474v1_cds_rna_from_genomic.fna
+  oscillibacter_valericigenes: Data/Raw/genomes/GCF_021531915.1_ASM2153191v1_cds_rna_from_genomic.fna
+  phocaeicola_coprocola: Data/Raw/genomes/GCF_041333015.1_ASM4133301v1_cds_rna_from_genomic.fna
+  phocea_massiliensis: Data/Raw/genomes/GCF_900104615.1_PRJEB16353_cds_rna_from_genomic.fna
+  blautia_wexlerae: Data/Raw/genomes/GCF_025148125.1_ASM2514812v1_cds_rna_from_genomic.fna
+  lawsonibacter_asaccharolyticus: Data/Raw/genomes/GCF_022453915.1_ASM2245391v1_cds_rna_from_genomic.fna
+  anaerotruncus_colihominis: Data/Raw/genomes/GCF_025146135.1_ASM2514613v1_cds_rna_from_genomic.fna
+  fusobacterium_nucleatum: Data/Raw/genomes/GCF_003019295.1_ASM301929v1_cds_rna_from_genomic.fna
+  peptostreptococcus_stomatis: Data/Raw/genomes/GCF_000147675.1_ASM14767v1_cds_rna_from_genomic.fna
+  phocaeicola_sartorii: Data/Raw/genomes/GCF_054653615.1_ASM5465361v1_cds_rna_from_genomic.fna
+  provencibacterium_massiliense: Data/Raw/genomes/GCF_900169495.1_PRJEB19965_cds_rna_from_genomic.fna
+  wansuia_hejianensis: Data/Raw/genomes/GCF_014337215.1_ASM1433721v1_cds_rna_from_genomic.fna
+  youxingia_wuxianensis: Data/Raw/genomes/GCF_014385085.1_ASM1438508v1_cds_rna_from_genomic.fna
 
 #----- Shared by both arms -----#
 threads: 8
@@ -27,7 +39,7 @@ seed: null                              # Forced seed "x,y"; RNAhybrid -f, IntaR
 
 #----- Parameters for RNAcalibrate -----#
 rnacalibrate:
-  calibration_variant: "on"             # "on" | "off" | "both"
+  calibration_variant: both                 # both arms: Analysis_v3 binds rnahybrid over w_ AND wo_calibration
   k: 10000
   max_target_length: 50000
   randomize_targets: true
@@ -125,4 +137,4 @@ plots:
   protein:
 
 #----- Where outputs should be generated -----#
-results_dir: Data/Results/fixed_pvalue/predicted_all/
+results_dir: Data/Results/fixed_pvalue_new_backgrounds/background_negative/

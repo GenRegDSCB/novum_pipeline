@@ -110,11 +110,21 @@ window.CONFIG_BLOCKS = {
     ["pvalue_threshold", "n"],
     ["distribution", "n"],
   ],
+  // `type` and the locus/gene/protein lists have their own shapes and are read by hand.
+  plots: [
+    ["basesize", "p"],
+    ["pvalue_threshold", "p"],
+    ["per_mirna_top_n", "p"],
+  ],
 };
 
 //----- The `intarna:` sub-blocks, same entry shape as CONFIG_BLOCKS above -----//
 window.INTARNA_BLOCKS = {
   top: [
+    ["accessibility_variant", "v"],
+    ["prediction_mode", "p"],
+    ["model", "p"],
+    ["energy_set", "p"],
     ["max_hybrid_energy", "n"],
     ["min_target_unpaired_probability", "n"],
     ["min_query_unpaired_probability", "n"],
@@ -161,14 +171,14 @@ const INTARNA_SEED_NULLABLE_KEYS   = nullableKeys(window.INTARNA_BLOCKS.seed);
 const INTARNA_ACC_NULLABLE_KEYS    = nullableKeys(window.INTARNA_BLOCKS.accessibility);
 const INTARNA_OUTPUT_NULLABLE_KEYS = nullableKeys(window.INTARNA_BLOCKS.output);
 
-//----- `distribution` is supplied by RNAcalibrate whenever calibration is part of the run,
-//      so the RNAhybrid form forces it null in any variant other than "off" -----//
-window.isDistributionForced = (cfg) => cfg.rnacalibrate.calibration_variant !== "off";
+//----- `distribution` is supplied by RNAcalibrate only when calibration is the sole variant;
+//      under "both" the wo_calibration arm still runs on the static distribution/species -----//
+window.isDistributionForced = (cfg) => cfg.rnacalibrate.calibration_variant === "on";
 
 //----- IntaRNA seed sub-fields only affect a run when a shared seed is set (intarna.py:
 //      _add_seed_flags). Via resolveNullable, not `.set`: a toggled-on-but-blank seed saves
 //      as null, and would otherwise enable sub-fields for a run getting --noSeed -----//
-window.isSeedEnforced = (cfg) => window.resolveNullable(cfg.seed, false).v != null;
+window.isSeedEnforced = (cfg) => window.resolveNullable(cfg.seed) != null;
 
 //----- Helix parameters only reach IntaRNA under model B; under X/S/P they are inert.
 //      Mirrors _intarna_config.py:INTARNA_DEFAULT_HELIX_MAX_BP -----//
@@ -188,11 +198,11 @@ window.INTARNA_DEFAULT_ACC_BP_SPAN = 100;
 //      resolveNullable so a set-but-blank input collapses to null exactly as it does on save -----//
 window.helixSeedConflict = (cfg) => {
   if (!window.isHelixActive(cfg)) return null;
-  const seed = window.resolveNullable(cfg.seed, false).v;
+  const seed = window.resolveNullable(cfg.seed);
   if (seed == null) return null;
   const [a, b] = String(seed).split(",").map(Number);
   const seedBP = b - a + 1;
-  const maxBP = window.resolveNullable(cfg.intarna.helix.max_bp, false).v
+  const maxBP = window.resolveNullable(cfg.intarna.helix.max_bp)
     ?? window.INTARNA_DEFAULT_HELIX_MAX_BP;
   return seedBP > maxBP ? { seedBP, maxBP } : null;
 };
@@ -228,8 +238,8 @@ window.accessibilityConflicts = (cfg) => {
   const acc = cfg.intarna.accessibility;
   const conflicts = [];
   for (const [sharedKey, sideKey] of window.ACCESSIBILITY_WINDOW_CONFLICTS) {
-    const shared = window.resolveNullable(acc[sharedKey], false).v;
-    const side = window.resolveNullable(acc[sideKey], false).v;
+    const shared = window.resolveNullable(acc[sharedKey]);
+    const side = window.resolveNullable(acc[sideKey]);
     if (shared == null || side == null || shared === side) continue;
     conflicts.push({ sharedKey, sideKey, shared, side });
   }

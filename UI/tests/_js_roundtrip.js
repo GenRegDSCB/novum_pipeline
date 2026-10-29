@@ -4,7 +4,8 @@
 //
 // Usage:   node _js_roundtrip.js <path/to/data.js> <path/to/config.js>  < input.json
 // stdin:   {"raw": <object to pass to hydrateConfig>}
-// stdout:  {"hydrated": <hydrateConfig(raw)>, "obj": <configToObject(hydrated)>}
+// stdout:  {"hydrated": <hydrateConfig(raw)>, "obj": <configToObject(hydrated)>,
+//           "optional": <countOptionalParams(hydrated)>}
 // A JS exception is left uncaught on purpose — a non-zero exit with a stack trace is a
 // test failure, not a value to compare.
 "use strict";
@@ -28,4 +29,5 @@ vm.runInContext(fs.readFileSync(configJsPath, "utf8"), sandbox, { filename: conf
 const { raw } = JSON.parse(fs.readFileSync(0, "utf8"));
 const hydrated = sandbox.hydrateConfig(raw);
 const obj = sandbox.configToObject(hydrated);
-process.stdout.write(JSON.stringify({ hydrated, obj }));
+const optional = sandbox.countOptionalParams(hydrated);
+process.stdout.write(JSON.stringify({ hydrated, obj, optional }));

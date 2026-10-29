@@ -3,7 +3,10 @@ from __future__ import annotations
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config_writer import replace_block
+import tempfile
+from pathlib import Path
+
+from config_writer import replace_block, update_path_blocks
 
 SAMPLE = """\
 #----- miRNAs -----#
@@ -99,6 +102,19 @@ def test_missing_key_raises():
         assert "queries" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_update_path_blocks_keeps_the_configs_mode():
+    # A temp file + os.replace used to hand config.yaml the temp file's 0600.
+    d = Path(tempfile.mkdtemp())
+    config = d / "config.yaml"
+    for mode in (0o644, 0o640):
+        config.write_text("queries:\n  a: a.fa\ntargets:\n  a: a.fna\n")
+        config.chmod(mode)
+        update_path_blocks(config, {"b": "b.fa"}, {"b": "b.fna"})
+        assert config.stat().st_mode & 0o777 == mode
+        assert "  b: b.fna" in config.read_text().splitlines()
+    assert [p.name for p in d.iterdir()] == ["config.yaml"]   # no temp left behind
 
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

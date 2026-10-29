@@ -18,6 +18,7 @@ import enhance_intarna
 import enhance_rnahybrid
 import tidy_intarna
 import tidy_rnahybrid
+from _report import INTARNA_DUPLEX_COLUMNS, RNAHYBRID_DUPLEX_COLUMNS
 
 
 REPORTS = (
@@ -35,14 +36,8 @@ def test_every_report_takes_its_sections_from_the_producers():
         assert module.SECTION_COLUMNS == groups
 
 
-def test_no_report_echoes_a_sectioned_column_as_metadata():
-    for module, groups in REPORTS:
-        for group in groups:
-            assert set(group) <= module.SKIP_AS_METADATA
-
-
 def _consensus_frame():
-    row = {column: "x" for column in enhance_consensus.DUPLEX_COLUMNS}
+    row = {column: "x" for column in RNAHYBRID_DUPLEX_COLUMNS + INTARNA_DUPLEX_COLUMNS}
     row["subseqDP"] = "ACGU&UGCA"
     row["hybridDP"] = "((((&))))"
     for group in enhance_consensus.SECTION_COLUMNS:

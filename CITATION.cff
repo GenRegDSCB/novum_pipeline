@@ -9,7 +9,7 @@ authors:
     family-names: Sola
     email: albertosola2002@gmail.com
     affiliation: Università degli Studi di Torino (UniTo)
-repository-code: "https://github.com/alberto-sola/novum_pipeline"
+repository-code: "https://github.com/GenRegDSCB/novum_pipeline"
 license: MIT
 abstract: >-
   Snakemake workflow for predicting miRNA targets in

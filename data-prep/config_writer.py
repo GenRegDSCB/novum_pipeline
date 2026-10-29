@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
+import secrets
+import stat
 from pathlib import Path
 
 
@@ -15,11 +16,8 @@ def replace_block(lines: list[str], key: str, mapping: dict[str, str]) -> list[s
     if i is None:
         raise ValueError(f"expected top-level '{key}:' in config")
 
-    # The block runs to the next top-level KEY — a column-0 line that is neither
-    # blank nor a comment. Only a key may end it: a comment written at column 0
-    # inside the block used to terminate it early, so the entries below survived
-    # next to the new ones. That is a duplicate YAML mapping key, which loads
-    # without complaint (last wins), silently running the pipeline on the old path.
+    # The block runs to the next top-level KEY. A column-0 comment must not end it, or the
+    # old entries below it survive as silent duplicate mapping keys (last wins).
     end = i + 1
     for j in range(i + 1, len(lines)):
         ln = lines[j]
@@ -28,30 +26,35 @@ def replace_block(lines: list[str], key: str, mapping: dict[str, str]) -> list[s
             continue
         break
 
-    # Entries are replaced wholesale, but blanks and comments are this module's
-    # whole reason to exist, so they are kept and re-emitted below the new entries
-    # — including any that sit between the last entry and the next key, which is
-    # where they were already.
+    # Entries are replaced wholesale; the block's blanks and comments are re-emitted below them.
     kept = [ln for ln in lines[i + 1 : end]
             if ln.strip() == "" or ln.lstrip().startswith("#")]
     new_entries = [f"  {k}: {v}" for k, v in mapping.items()]
     return lines[: i + 1] + new_entries + kept + lines[end:]
 
 
-#----- Rewrites queries: and targets: via a temp file, so a crash never leaves a partial config -----#
+#----- Writes text or bytes via a same-directory temp file + os.replace, so a crash never leaves a
+#      partial file. 0o666 lets umask set a new file's mode; an existing file keeps its own -----#
+def atomic_write(path, data: str | bytes) -> None:
+    path = Path(path)
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    try:
+        with os.fdopen(fd, "wb" if isinstance(data, bytes) else "w") as fh:
+            if path.exists():
+                os.chmod(tmp, stat.S_IMODE(path.stat().st_mode))
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+#----- Rewrites queries: and targets: atomically -----#
 def update_path_blocks(config_path, queries: dict[str, str], targets: dict[str, str]) -> None:
     path = Path(config_path)
     lines = path.read_text().splitlines()
     lines = replace_block(lines, "queries", queries)
     lines = replace_block(lines, "targets", targets)
-    text = "\n".join(lines) + "\n"
-
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(text)
-        os.replace(tmp, path)               # atomic; never a partial config
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
+    atomic_write(path, "\n".join(lines) + "\n")

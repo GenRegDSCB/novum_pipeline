@@ -104,6 +104,17 @@ def test_a_fatal_message_explains_that_every_anchor_would_be_identical():
     with pytest.raises(ValueError, match="identical"):
         rcc.validate_rnacalibrate_config(_cfg(randomize_targets=False))
 
+def test_a_is_not_fatal_when_calibration_is_off():
+    # No calibration runs, so the ladder is inert whatever randomize_targets says, and
+    # (d) is the check that reports it.
+    warnings = rcc.validate_rnacalibrate_config(_cfg(randomize_targets=False),
+                                                calibration_on=False)
+    assert any("wholly inert" in w for w in warnings)
+
+def test_a_still_fires_when_calibration_is_explicitly_on():
+    with pytest.raises(ValueError, match="randomize_targets"):
+        rcc.validate_rnacalibrate_config(_cfg(randomize_targets=False), calibration_on=True)
+
 def test_b_fatal_on_a_malformed_ladder():
     with pytest.raises(ValueError):
         rcc.validate_rnacalibrate_config(_cfg(length_anchors="76,150,abc"))

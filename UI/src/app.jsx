@@ -2,20 +2,26 @@
 
 const { useState, useEffect, useRef } = React;
 
-//----- Pipeline lifecycle:
-//   idle      → no run in flight
-//   running   → snakemake is alive
-//   succeeded → terminal · exit 0
-//   failed    → terminal · non-zero exit
-//   cancelled → terminal · user pressed Cancel
-//
-// Terminal states stay until the user dismisses the overlay; we then call
-// `acknowledge_pipeline` so the backend resets to idle. Without that
-// handshake a fast finish could be missed between two polls. -----//
+//----- Pipeline lifecycle: idle → running → succeeded | failed | cancelled. A terminal state
+//      stays until the overlay is dismissed, then acknowledge_pipeline resets the backend,
+//      so a fast finish is never missed between two polls -----//
+
+//----- Why a load_config result cannot seed the form, else null. config_io answers {} for a
+//      file it cannot read or that holds no mapping, and {__error__} for unparseable YAML -----//
+function loadFailure(raw) {
+  if (raw && raw.__error__) return `parse error · ${raw.__error__}`;
+  if (!raw || typeof raw !== "object" || !Object.keys(raw).length) {
+    return "file missing, unreadable, empty or not a mapping";
+  }
+  return null;
+}
 
 //----- Root component: owns the config, the theme, and the pipeline state machine -----//
 function App() {
   const [cfg, setCfg] = useState(() => JSON.parse(JSON.stringify(window.INITIAL_CONFIG)));
+  // Save and Run rewrite config.yaml whole from `cfg`, so neither may write until a load has
+  // succeeded: { ok: false, error: null } is a load in flight, a set `error` one that failed.
+  const [load, setLoad] = useState({ ok: false, error: null });
   const [theme, setTheme] = useState(() => localStorage.getItem("np:theme") || "light");
   const [yamlOpen, setYamlOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -34,17 +40,27 @@ function App() {
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
-  useEffect(() => {
-    const load = async () => {
-      const api = window.pywebview?.api;
-      if (!api?.load_config) return;
+  //----- Read config.yaml into the form. A failure leaves the form as it was and keeps
+  //      writes blocked until a later reload succeeds -----//
+  const loadConfig = async () => {
+    const api = window.pywebview?.api;
+    if (!api?.load_config) return;
+    try {
       const raw = await api.load_config();
-      if (raw && raw.__error__) { showToast(`Config parse error · using defaults`, "danger"); return; }
-      if (raw && Object.keys(raw).length) setCfg(window.hydrateConfig(raw));
-    };
-    if (window.pywebview?.api) load();
-    else window.addEventListener("pywebviewready", load, { once: true });
-    return () => window.removeEventListener("pywebviewready", load);
+      const error = loadFailure(raw);
+      if (error) return setLoad({ ok: false, error });
+      setCfg(window.hydrateConfig(raw));
+      setLoad({ ok: true, error: null });
+    } catch (exc) {
+      setLoad({ ok: false, error: String(exc?.message || exc) });
+    }
+  };
+
+  // Keyed on the method, not `api`: pywebview creates `api: {}` before filling it.
+  useEffect(() => {
+    if (typeof window.pywebview?.api?.load_config === "function") loadConfig();
+    else window.addEventListener("pywebviewready", loadConfig, { once: true });
+    return () => window.removeEventListener("pywebviewready", loadConfig);
   }, []);
 
   //----- One toast at a time; a new one replaces whatever is on screen -----//
@@ -52,6 +68,13 @@ function App() {
     clearTimeout(toastTimer.current);
     setToast({ msg, tone });
     toastTimer.current = setTimeout(() => setToast(null), 3200);
+  };
+
+  //----- Refuses (with a toast) while no load has succeeded; true means "do not write" -----//
+  const writeBlocked = () => {
+    if (load.ok) return false;
+    showToast(load.error ? "Config not loaded · fix the file, then Reload" : "Config still loading", "danger");
+    return true;
   };
 
   //----- Write config.yaml without launching anything -----//
@@ -64,6 +87,7 @@ function App() {
         showToast("Preview mode · nothing written");
         return;
       }
+      if (writeBlocked()) return;
       const res = await api.save_config(window.configToObject(cfg));
       if (res?.ok) showToast(`Saved to ${res.path}`, "success");
       else showToast(`Save failed · ${res?.error || "unknown error"}`, "danger");
@@ -80,6 +104,7 @@ function App() {
       showToast("Preview mode · cannot launch");
       return;
     }
+    if (writeBlocked()) return;               // run_pipeline saves the config before launching
     // Clear any stale terminal state so the polling effect can't snap the
     // overlay back to a prior 'succeeded'/'failed' as the new run starts.
     // If the backend refuses (a previous run is still draining), surface
@@ -145,6 +170,17 @@ function App() {
     <div className="desk">
       <div className="window">
         <div className="window-body">
+          {load.error && (
+            <div className="callout" role="alert"
+                 style={{ margin: "12px 24px 0", borderColor: "var(--danger)", color: "var(--danger)" }}>
+              <span className="badge" aria-hidden>!</span>
+              <div style={{ flex: 1 }}>
+                Config/config.yaml was not loaded ({load.error}). Save and Run are blocked so
+                defaults cannot overwrite it; fix the file, then reload.
+              </div>
+              <button className="btn sm" onClick={loadConfig}>Reload</button>
+            </div>
+          )}
           <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto" }}>
             <div className="card-stack">
               <ErrorBoundary>

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import requests
 
+from config_writer import atomic_write
+
 # miRBase current mature set. gz is auto-detected by magic bytes, so either the
 # plain or the .gz URL works; adjust here if miRBase moves the path.
 MIRBASE_URL = "https://www.mirbase.org/download/mature.fa"
@@ -93,5 +95,5 @@ def ensure_mature_fa(mirnas_dir, session, force: bool = False, url: str = MIRBAS
     # has already decompressed, and a .gz URL would then send plain FASTA here.
     if data[:2] == b"\x1f\x8b":
         data = gzip.decompress(data)
-    out.write_bytes(data)
+    atomic_write(out, data)             # a partial file would read as a cache hit
     return out

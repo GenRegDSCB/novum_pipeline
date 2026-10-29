@@ -13,6 +13,13 @@ from mirnas import (ensure_mature_fa, index_mature, resolve_mirna, write_query_f
                     query_fasta_path, DEFAULT_PREFIX_CHAIN, MatureUnavailable)
 from config_writer import update_path_blocks
 
+# One spelling of each path default, shared by run() and the CLI.
+DEFAULT_CONFIG = "Config/config.yaml"
+DEFAULT_RNAS_DIR = "Data/Raw/RNAs"
+DEFAULT_GENOMES_DIR = "Data/Raw/genomes"
+DEFAULT_MIRNAS_DIR = "Data/Raw/miRNAs"
+DEFAULT_REPORT = "data-prep/prep_report.tsv"
+
 
 #----- One spelling of the genome verdict, shared by the console summary and the report -----#
 def _genome_status(taxon, hit, gpath, errored=False):
@@ -62,10 +69,10 @@ def _write_report(path, groups, genome_paths, hits_by_taxon, per_mirna, rna_stat
 
 
 #----- Bootstrap: resolve+download targets, build query FASTAs, write config and report -----#
-def run(pairs_path=None, inline=None, config="Config/config.yaml",
-        rnas_dir="Data/Raw/RNAs", genomes_dir="Data/Raw/genomes",
-        mirnas_dir="Data/Raw/miRNAs", prefix_chain=DEFAULT_PREFIX_CHAIN,
-        report="data-prep/prep_report.tsv", force=False, dry_run=False):
+def run(pairs_path=None, inline=None, config=DEFAULT_CONFIG,
+        rnas_dir=DEFAULT_RNAS_DIR, genomes_dir=DEFAULT_GENOMES_DIR,
+        mirnas_dir=DEFAULT_MIRNAS_DIR, prefix_chain=DEFAULT_PREFIX_CHAIN,
+        report=DEFAULT_REPORT, force=False, dry_run=False):
     text = ""
     if pairs_path:
         text += Path(pairs_path).read_text()
@@ -157,12 +164,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Bootstrap pipeline inputs from (taxon, miRNA) pairs.")
     ap.add_argument("inline", nargs="*", help='inline "taxon:miRNA" pairs')
     ap.add_argument("--pairs", help="pairs file (taxon-first syntax)")
-    ap.add_argument("--config", default="Config/config.yaml")
-    ap.add_argument("--rnas-dir", default="Data/Raw/RNAs")
-    ap.add_argument("--genomes-dir", default="Data/Raw/genomes")
-    ap.add_argument("--mirnas-dir", default="Data/Raw/miRNAs")
+    ap.add_argument("--config", default=DEFAULT_CONFIG)
+    ap.add_argument("--rnas-dir", default=DEFAULT_RNAS_DIR)
+    ap.add_argument("--genomes-dir", default=DEFAULT_GENOMES_DIR)
+    ap.add_argument("--mirnas-dir", default=DEFAULT_MIRNAS_DIR)
     ap.add_argument("--prefix-chain", default=",".join(DEFAULT_PREFIX_CHAIN))
-    ap.add_argument("--report", default="data-prep/prep_report.tsv")
+    ap.add_argument("--report", default=DEFAULT_REPORT)
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()

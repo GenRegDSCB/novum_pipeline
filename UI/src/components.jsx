@@ -458,6 +458,7 @@ function NullableField({
   name, doc, value, onChange,
   kind = "number",        // "number" | "integer" | "pair"
   pairLabels,             // ["start nt", "end nt"] etc.
+  pairNumber = "integer", // "integer" | "float": what each side of a pair accepts
   forcedNull = false,
   forcedNullHint,
   nullHint,
@@ -475,6 +476,14 @@ function NullableField({
     const n = parseInt(s, 10);
     return Number.isFinite(n) ? clamp(n) : "";
   };
+  // undefined = partial input ("1e", ".", "-") to ignore; a stored "-" or NaN would
+  // serialize into the YAML verbatim.
+  const toFloat = (s) => {
+    if (s === "") return s;
+    const n = Number(s);
+    return Number.isFinite(n) ? clamp(n) : undefined;
+  };
+  const pairFloat = pairNumber === "float";
   // Four outcomes, read top to bottom rather than as one nested ternary in the JSX.
   let body;
   if (forcedNull) {
@@ -491,13 +500,16 @@ function NullableField({
             <input
               className="input mono"
               type="number"
-              step="1"
-              inputMode="numeric"
+              step={pairFloat ? "any" : "1"}
+              inputMode={pairFloat ? "decimal" : "numeric"}
               min={min}
               max={max}
               placeholder={pairLabels?.[i]}
               value={value[side] ?? ""}
-              onChange={(e) => onChange({ ...value, [side]: toInt(e.target.value) })}
+              onChange={(e) => {
+                const next = pairFloat ? toFloat(e.target.value) : toInt(e.target.value);
+                if (next !== undefined) onChange({ ...value, [side]: next });
+              }}
             />
           </React.Fragment>
         ))}
@@ -514,14 +526,8 @@ function NullableField({
         max={max}
         value={value.value}
         onChange={(e) => {
-          const raw = e.target.value;
-          if (raw === "") return onChange({ ...value, value: "" });
-          if (kind === "integer") return onChange({ ...value, value: toInt(raw) });
-          const n = Number(raw);
-          // Ignore partial input like "1e" or ".": NaN would otherwise
-          // serialize as the literal `NaN` in YAML.
-          if (!Number.isFinite(n)) return;
-          onChange({ ...value, value: clamp(n) });
+          const next = kind === "integer" ? toInt(e.target.value) : toFloat(e.target.value);
+          if (next !== undefined) onChange({ ...value, value: next });
         }}
       />
     );

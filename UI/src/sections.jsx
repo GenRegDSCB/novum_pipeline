@@ -230,6 +230,8 @@ function RNAHybridSection({ cfg, setCfg }) {
   const set = (patch) => setCfg({ ...cfg, rnahybrid: { ...r, ...patch } });
   const setF = (key, next) => set({ [key]: next });
   const distLocked = window.isDistributionForced(cfg);
+  // Under "both" species/distribution still drive the wo_calibration arm, and only it.
+  const armNote = cfg.rnacalibrate.calibration_variant === "both" ? " · wo_calibration arm only" : "";
 
   return (
     <SectionCard
@@ -247,7 +249,7 @@ function RNAHybridSection({ cfg, setCfg }) {
             </div>
           </Subcard>
         ) : (
-          <Subcard label="Species model" hint="3′UTR distribution">
+          <Subcard label="Species model" hint={`3′UTR distribution${armNote}`}>
             <select
               className="select"
               value={r.species}
@@ -273,9 +275,9 @@ function RNAHybridSection({ cfg, setCfg }) {
           <NullableField name="p-value threshold"
             min={0}
             value={r.pvalue_threshold} onChange={(v) => setF("pvalue_threshold", v)} />
-          <NullableField name="Distribution" doc="mean,std" kind="pair"
-            min={0}
-            pairLabels={["mean", "std"]}
+          <NullableField name="Distribution" doc={`Gumbel xi,theta${armNote}`} kind="pair"
+            pairNumber="float" min={0}
+            pairLabels={["xi", "theta"]}
             value={r.distribution}
             onChange={(v) => setF("distribution", v)}
             forcedNull={distLocked}

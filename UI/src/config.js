@@ -5,31 +5,18 @@
 // window.CONFIG_BLOCKS / INTARNA_BLOCKS specs, so a key cannot be written without
 // being read back — the failure that once dropped `rnacalibrate.rng_seed` silently.
 
-//----- Nullable form field -> serialized {v, kind}. Pair-shaped fields (`a`/`b`) emit
-//      "a,b"; unset/forced/blank fields collapse to null. The one place that collapsing
-//      happens — data.js's derived warnings must route through it too, or they can
-//      contradict what Save writes -----//
-function resolveNullable(field, forced) {
-  if (forced || !field.set) {
-    return { v: null, kind: "null" };
-  }
+//----- Nullable form field -> serialized value. Pair-shaped fields (`a`/`b`) emit "a,b";
+//      unset/forced/blank fields collapse to null. data.js's derived warnings route through
+//      it too, so they cannot contradict what Save writes -----//
+function resolveNullable(field, forced = false) {
+  if (forced || !field.set) return null;
   if ("a" in field && "b" in field) {
     const { a, b } = field;
-    if (a === "" || b === "" || a == null || b == null) {
-      return { v: null, kind: "null" };
-    }
-    return { v: `${a},${b}`, kind: "str" };
+    return a === "" || b === "" || a == null || b == null ? null : `${a},${b}`;
   }
-  if (field.value === "" || field.value === null || field.value === undefined) {
-    return { v: null, kind: "null" };
-  }
-  return { v: field.value, kind: typeof field.value === "string" ? "str" : "num" };
+  return field.value === "" || field.value == null ? null : field.value;
 }
 window.resolveNullable = resolveNullable;
-
-function _nullableValue(field, forced) {
-  return resolveNullable(field, forced).v;
-}
 
 //----- One config block, emitted from its spec. `forced(key)` collapses a field to null
 //      whatever its toggle says (RNAhybrid's distribution, once calibration supplies it).
@@ -37,7 +24,7 @@ function _nullableValue(field, forced) {
 function _block(state, spec, forced = () => false) {
   return Object.fromEntries(spec.map(([key, kind]) => [
     key,
-    kind === "n" ? _nullableValue(state[key], forced(key))
+    kind === "n" ? resolveNullable(state[key], forced(key))
     : kind === "s" ? (String(state[key] ?? "").trim() || null)
     : kind === "c" ? window.INTARNA_OUTPUT_COLUMNS_DEFAULT
     : state[key],
@@ -77,10 +64,6 @@ window.configToObject = function configToObject(cfg) {
   const it = cfg.intarna;
   const BI = window.INTARNA_BLOCKS;
   obj.intarna = {
-    accessibility_variant: it.accessibility_variant,
-    prediction_mode: it.prediction_mode,
-    model: it.model,
-    energy_set: it.energy_set,
     ..._block(it, BI.top),
     helix:         _block(it.helix,         BI.helix),
     seed:          _block(it.seed,          BI.seed),
@@ -96,9 +79,7 @@ window.configToObject = function configToObject(cfg) {
   const isAll = pl.types.length > 0 && window.PLOT_TYPE_VALUES.every((t) => pl.types.includes(t));
   obj.plots = {
     type: pl.types.length === 0 ? null : (isAll ? "all" : pl.types.join(",")),
-    basesize: pl.basesize,
-    pvalue_threshold: pl.pvalue_threshold,
-    per_mirna_top_n: pl.per_mirna_top_n,
+    ..._block(pl, B.plots),
     locus: _pairListToArray(pl.locus),
     gene: _pairListToArray(pl.gene),
     protein: _pairListToArray(pl.protein),
@@ -172,11 +153,6 @@ window.hydrateConfig = function hydrateConfig(raw) {
 
   if (raw.intarna) {
     const ri = raw.intarna, ci = cfg.intarna;
-    ci.accessibility_variant = _variantStr(ri.accessibility_variant, ci.accessibility_variant);
-    if (ri.prediction_mode != null) ci.prediction_mode = ri.prediction_mode;
-    if (ri.model != null) ci.model = ri.model;
-    if (ri.energy_set != null) ci.energy_set = ri.energy_set;
-
     const BI = window.INTARNA_BLOCKS;
     _hydrateBlock(ri,               ci,               BI.top);
     _hydrateBlock(ri.helix,         ci.helix,         BI.helix);
@@ -191,9 +167,7 @@ window.hydrateConfig = function hydrateConfig(raw) {
     cfg.plots.types = rp.type == null ? []
       : rp.type === "all" ? window.PLOT_TYPE_VALUES.slice()
       : String(rp.type).split(",").map((s) => s.trim()).filter(Boolean);
-    if (rp.basesize != null) cfg.plots.basesize = rp.basesize;
-    if (rp.pvalue_threshold != null) cfg.plots.pvalue_threshold = rp.pvalue_threshold;
-    if (rp.per_mirna_top_n != null) cfg.plots.per_mirna_top_n = rp.per_mirna_top_n;
+    _hydrateBlock(rp, cfg.plots, B.plots);
     window.PLOT_PAIR_LISTS.forEach(({ key }) => {
       if (rp[key] != null) cfg.plots[key] = _arrayToPairList(rp[key], key[0]);
     });

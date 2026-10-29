@@ -24,18 +24,18 @@ def _fasta(tmp_path, text):
 
 def test_length_stats_population_stdev(tmp_path):
     f = _fasta(tmp_path, ">a\nAAAA\n>b\nAAAAAA\n")
-    stats = rc.compute_target_length_stats(f)
+    stats = rc.summarise_lengths(rc.record_lengths(f))
     assert stats == {"count": 2, "mean": 5.0, "std": 1.0}
 
 
 def test_length_stats_single_record_has_zero_stdev(tmp_path):
     f = _fasta(tmp_path, ">a\nAAAA\n")
-    assert rc.compute_target_length_stats(f)["std"] == 0.0
+    assert rc.summarise_lengths(rc.record_lengths(f))["std"] == 0.0
 
 
 def test_length_stats_rejects_empty_file(tmp_path):
     with pytest.raises(RuntimeError, match="No FASTA records"):
-        rc.compute_target_length_stats(_fasta(tmp_path, ""))
+        rc.record_lengths(_fasta(tmp_path, ""))
 
 
 def test_build_length_arg_rounds_to_ints():
@@ -78,11 +78,6 @@ def test_parse_output_returns_one_entry_per_row():
         {"query": "hsa-let-7a-5p", "sample_size": 64, "xi": 2.118843, "theta": 0.166056},
         {"query": "hsa-miR-21-5p", "sample_size": 63, "xi": 2.025677, "theta": 0.163574},
     ]}
-
-
-def test_parse_output_rejects_nan():
-    with pytest.raises(RuntimeError, match="NaN"):
-        rc.parse_rnacalibrate_output("hsa-miR-2861 105 -nan -nan\n")
 
 
 def test_parse_output_rejects_wrong_column_count():
@@ -429,7 +424,7 @@ def test_run_rnacalibrate_warns_only_when_the_seed_is_inert(
     monkeypatch.setattr(rc, "which_required", lambda *a: "RNAcalibrate")
     monkeypatch.setattr(rc, "resolve_faketime_library", lambda *a: "/opt/lib/libfaketime.so.1")
     monkeypatch.setattr(rc, "verify_faketime", lambda *a, **k: None)  # probed above
-    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _completed("m 1 1.0 1.0\n"))
+    monkeypatch.setattr(rc.subprocess, "run", lambda *a, **k: _completed("m 300 2.4 0.18\n"))
 
     rc.run_rnacalibrate(q, t, tmp_path / "out.json", k=10, max_target_length=100,
                         randomize_targets=randomize_targets, rng_seed=rng_seed)
@@ -513,19 +508,14 @@ def test_record_lengths_feeds_both_the_l_stats_and_the_cell_counts(tmp_path):
         f">r{i}\n{'A' * length}\n" for i, length in enumerate([50, 734, 736, 5000])))
     lengths = rc.record_lengths(f)
     assert lengths == [50, 734, 736, 5000]
-    assert rc.summarise_lengths(lengths) == rc.compute_target_length_stats(f)
 
 
-def test_parse_output_lets_nan_through_when_asked():
-    # The anchor path classifies a degenerate fit rather than raising; Tier 2 retries it.
-    parsed = rc.parse_rnacalibrate_output("hsa-miR-1224-5p 222 -nan -nan\n", reject_nan=False)
+def test_parse_output_lets_nan_through():
+    # Parsing never judges a fit; classify_fit does, on both the reference and anchor paths.
+    parsed = rc.parse_rnacalibrate_output("hsa-miR-1224-5p 222 -nan -nan\n")
     row = parsed["per_query"][0]
     assert row["sample_size"] == 222
     assert math.isnan(row["xi"]) and math.isnan(row["theta"])
-
-def test_parse_output_still_raises_on_nan_by_default():
-    with pytest.raises(rc.DegenerateFitError):
-        rc.parse_rnacalibrate_output("hsa-miR-1224-5p 222 -nan -nan\n")
 
 
 # --- resolve_strata: Tier 3 and extrapolation ---
@@ -755,6 +745,70 @@ def test_run_rnacalibrate_anchored_path_writes_uniform_11_key_strata(tmp_path, m
     assert all(set(s.keys()) == STRATUM_KEYS for s in strata)
 
 
+# --- the reference (whole-file) fit: classified like an anchor fit, never emitted degenerate ---
+
+# The invalid rows RNAcalibrate prints, each with classify_fit's verdict.
+DEGENERATE_REFERENCE_ROWS = [
+    ("105 -nan -nan", "non_finite"),
+    ("0 0.000000 0.000000", "degenerate_sample"),
+    ("-2 0.000000 0.000000", "degenerate_sample"),
+    ("300 2.4 0.000000", "non_positive_theta"),
+    ("300 13970.0 -2022.0", "non_positive_theta"),
+    ("300 -3.33 0.803", "non_positive_xi"),
+]
+
+
+def _fake_calibration_run(tmp_path, monkeypatch, reference_row, anchor_row="300 2.4 0.18",
+                          **run_kwargs):
+    query = tmp_path / "q.fa"
+    query.write_text(">mirA\nACGUACGUACGU\n")
+    target = tmp_path / "t.fna"
+    target.write_text(">g1\n" + "A" * 50 + "\n>g2\n" + "A" * 150 + "\n>g3\n" + "A" * 250 + "\n")
+
+    monkeypatch.setattr(rc, "which_required", lambda *a: "RNAcalibrate")
+    monkeypatch.setattr(rc, "resolve_faketime_library", lambda *a: "/opt/lib/libfaketime.so.1")
+    monkeypatch.setattr(rc, "verify_faketime", lambda *a, **k: None)
+    reference_l = rc.build_length_arg(rc.summarise_lengths(rc.record_lengths(target)))["value"]
+
+    def fake_run(command, **kwargs):
+        is_reference = command[command.index("-l") + 1] == reference_l
+        return _completed(f"mirA {reference_row if is_reference else anchor_row}\n")
+
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    out = tmp_path / "out.json"
+    rc.run_rnacalibrate(query, target, out, k=10000, max_target_length=100000,
+                        randomize_targets=True, rng_seed=1, **run_kwargs)
+    return out
+
+
+@pytest.mark.parametrize("row, reason", DEGENERATE_REFERENCE_ROWS)
+def test_a_ladderless_run_refuses_a_degenerate_reference_fit(tmp_path, monkeypatch, row, reason):
+    # Without a ladder the reference fit IS RNAhybrid's -d; theta <= 0 there is no null at all.
+    with pytest.raises(rc.DegenerateFitError) as excinfo:
+        _fake_calibration_run(tmp_path, monkeypatch, row)
+    message = str(excinfo.value)
+    assert "mirA" in message and reason in message
+    assert "derived_seed=" in message and "rnacalibrate.k" in message
+    assert not (tmp_path / "out.json").exists()
+
+
+@pytest.mark.parametrize("row, reason", DEGENERATE_REFERENCE_ROWS)
+def test_reference_fallback_never_copies_a_degenerate_reference_fit(
+        tmp_path, monkeypatch, row, reason):
+    # Every anchor fails all five rungs, so the curve is unusable and each cell would fall
+    # back to the reference fit — which must be refused rather than copied into all three.
+    with pytest.raises(rc.DegenerateFitError, match=reason):
+        _fake_calibration_run(tmp_path, monkeypatch, row, anchor_row="2 -nan -nan",
+                              length_anchors=(76, 150, 300))
+    assert not (tmp_path / "out.json").exists()
+
+
+def test_a_sound_reference_fit_is_written_through(tmp_path, monkeypatch):
+    out = _fake_calibration_run(tmp_path, monkeypatch, "300 2.4 0.18")
+    [entry] = json.loads(out.read_text())["calibration"]["per_query"]
+    assert (entry["sample_size"], entry["xi"], entry["theta"]) == (300, 2.4, 0.18)
+
+
 # --- one binary-dependent test, following the test_intarna.py precedent ---
 
 ECOLI = Path("Data/Raw/genomes/GCF_000005845.2_ASM584v2_cds_rna_from_genomic.fna")
@@ -789,6 +843,6 @@ def test_the_binarys_two_failure_modes_are_still_what_the_guard_expects(
                             env=env).stdout
 
     row = rc.expect_single_row(
-        rc.parse_rnacalibrate_output(stdout, reject_nan=False), mirna)
+        rc.parse_rnacalibrate_output(stdout), mirna)
     assert row["sample_size"] == expected_n
     assert gf.classify_fit(row["sample_size"], row["xi"], row["theta"]) == expected_reason

@@ -62,15 +62,11 @@ def intersect_annotations(rnahybrid_csv, intarna_csv, output_csv):
 
     merged = rh_best.merge(in_best, on=keys, how="inner")
 
-    # The join is pair-granular — coordinates never constrain it, so a consensus row does NOT
-    # assert the two arms found the same site. Measure the disagreement rather than gating on
-    # it. Signed, not absolute: a one-directional offset is how the anchor mismatch surfaced
-    # in the first place, and positive means IntaRNA's site lies downstream.
-    if {"Position_rnahybrid", "Position_intarna", "Gene_length"} <= set(merged.columns):
-        merged["Site_offset_nt"] = (
-            (merged["Position_intarna"] - merged["Position_rnahybrid"])
-            * merged["Gene_length"]
-        ).round(1)
+    # The join is pair-granular, so measure the site disagreement rather than gate on it.
+    # Signed: positive means IntaRNA's site lies downstream.
+    merged["Site_offset_nt"] = (
+        (merged["Position_intarna"] - merged["Position_rnahybrid"]) * merged["Gene_length"]
+    ).round(1)
 
     absent = [c for c in CONSENSUS_COLUMNS if c not in merged.columns]
     if absent:

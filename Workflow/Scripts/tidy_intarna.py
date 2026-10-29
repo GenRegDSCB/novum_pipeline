@@ -79,12 +79,8 @@ def _prepare_chunk(chunk, gene_lengths, max_hybrid_energy, floors):
     if nonpositive:
         raise ValueError(f"Non-positive Gene_length in target FASTA for: {nonpositive}")
 
-    # The energy gate is authoritative on both variants: --outMaxE bounds E_hybrid+ED1+ED2
-    # under acc=C, so it cannot express this bound there. The floors run before the cap, or
-    # they would ask "was the strongest site accessible?" instead of "has this pair an
-    # accessible site at all?". One mask, one take: chaining them materialized a throwaway
-    # frame apiece on the path where most of a batch dies. NaN fails every comparison, so
-    # unknown accessibility is never admitted.
+    # The authoritative E_hybrid gate, then the Pu floors, which must run before the cap.
+    # One mask, one take; NaN fails every comparison, so unknown accessibility never passes.
     mask = None
     if max_hybrid_energy is not None:
         mask = chunk["E_hybrid"] <= max_hybrid_energy

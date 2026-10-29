@@ -23,13 +23,9 @@ INTARNA_MAX_OUTNUMBER = 1000
 # total E while the gate is on E_hybrid.
 INTARNA_DEFAULT_ACCESSIBILITY_SEARCH_DEPTH = 20
 
-# Median of (IntaRNA E_hybrid - RNAhybrid mfe) over matched, UNFILTERED acc=N hits — that
-# protocol is load-bearing, not incidental (re-measured 2026-08-12: +5.70, inside tolerance).
-# It equalizes the two GATES under acc=N ONLY, so never loosen intarna.max_hybrid_energy to
-# compensate for the stricter acc=C pass rate, and do NOT re-derive it from w_accessibility
-# output (~+6.0) — under acc=C IntaRNA relocates the site in ~63% of pairs, so its E_hybrid
-# is not the same duplex's. Measurements and pass rates:
-# docs/superpowers/specs/2026-07-23-cross-arm-energy-gate-design.md, CLAUDE.md "Per-arm energy gates".
+# Median of (IntaRNA E_hybrid - RNAhybrid mfe) over matched, UNFILTERED acc=N hits. It
+# equalizes the gates under acc=N only; never re-derive it from w_accessibility output.
+# See CLAUDE.md "Per-arm energy gates".
 INTARNA_RNAHYBRID_ENERGY_OFFSET = 5.10
 
 # Drift past this trips warning (d). A usability threshold, not a confidence bound — the

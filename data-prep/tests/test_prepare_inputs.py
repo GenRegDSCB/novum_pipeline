@@ -3,9 +3,16 @@ from __future__ import annotations
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import io
 import tempfile
+import zipfile
 from pathlib import Path
+from unittest import mock
 
+import requests
+
+import fetch_genomes
+import prepare_inputs
 from prepare_inputs import select_emitted, _write_report
 
 def test_emits_only_complete_taxa():
@@ -103,6 +110,61 @@ def test_pinned_accession_becomes_the_sample_key():
         "Data/Raw/RNAs", hits={"GCF_000284435.1": ("GCF_000284435.1", "ASM28443v1")})
     assert q == {"GCF_000284435.1": "Data/Raw/RNAs/GCF_000284435.1.fa"}
     assert skipped == {}
+
+
+class _Resp:
+    def __init__(self, body):
+        self.status_code = 404 if body is None else 200
+        self._body = body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}")
+
+    def iter_content(self, chunk_size=1):
+        yield self._body
+
+
+class _HalfFailingSession:
+    """POST batch 1 serves a CDS package for GCF_1.1, batch 2 is refused; every RNA GET 404s."""
+    def __init__(self):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("ncbi_dataset/data/GCF_1.1/cds_from_genomic.fna", ">lcl|X_cds_1\nAAAA\n")
+        self.batches = [buf.getvalue(), None]
+
+    def post(self, url, **kw):
+        return _Resp(self.batches.pop(0))
+
+    def get(self, url, **kw):
+        return _Resp(None)
+
+
+def test_a_failed_genome_batch_still_writes_the_config_and_report():
+    # Batch 2 failing used to raise out of run(), losing every resolution before it.
+    d = Path(tempfile.mkdtemp())
+    config = d / "config.yaml"
+    config.write_text("queries:\ntargets:\nthreads: 1\n")
+    (d / "miRNAs").mkdir()
+    (d / "miRNAs" / "mature.fa").write_text(">hsa-miR-1\nUGGAAUGUAAAGAAGUAUGUAU\n")
+    report = d / "report.tsv"
+    temp = Path(tempfile.mkdtemp())
+    hits = {"ecoli": ("GCF_1.1", "ASM1"), "vparvula": ("GCF_2.2", "ASM2")}
+    with mock.patch.object(prepare_inputs, "session_from_env",
+                           return_value=(_HalfFailingSession(), 0)), \
+            mock.patch.object(prepare_inputs, "resolve_assemblies", return_value=(hits, set())), \
+            mock.patch.object(fetch_genomes, "_BATCH_SIZE", 1), \
+            mock.patch.object(tempfile, "tempdir", str(temp)):
+        prepare_inputs.run(inline=["ecoli:hsa-miR-1", "vparvula:hsa-miR-1"],
+                           config=str(config), rnas_dir=str(d / "RNAs"),
+                           genomes_dir=str(d / "genomes"), mirnas_dir=str(d / "miRNAs"),
+                           report=str(report))
+    rows = {r[0]: r for r in (ln.split("\t") for ln in report.read_text().splitlines()[1:])}
+    assert rows["ecoli"][1] == "ok"
+    assert rows["vparvula"][1:3] == ["download_failed", "GCF_2.2"]
+    assert "  ecoli: " in config.read_text()
+    assert "vparvula" not in config.read_text()
+    assert list(temp.iterdir()) == []                     # batch 1's ZIP did not leak
 
 
 if __name__ == "__main__":

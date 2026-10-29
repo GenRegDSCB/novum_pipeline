@@ -1,13 +1,5 @@
-"""Shared scaffold for the per-record human-readable reports (enhance_* rules).
-
-Both enhancers write a `name: value` metadata block per hit followed by an
-ASCII duplex; only the arm-specific sections (RNAhybrid's 4-line alignment vs
-IntaRNA's energy/seed blocks + dot-bracket duplex) differ. This module owns the
-shared pieces: the NA-aware formatter, the duplex label constants, and the
-streaming driver that pairs columns to indices once and writes via itertuples to
-keep peak memory flat on large hit tables. Imports pandas, so it is only pulled
-in by the postprocess-env scripts.
-"""
+"""Shared driver for the per-record enhance_* reports: a metadata block, one block per scoring
+group, then each arm's duplex. Imports pandas, so only postprocess-env scripts pull it in."""
 
 import pandas as pd
 
@@ -72,9 +64,7 @@ def write_blocks(fh, blocks, row):
         write_pairs(fh, block, row)
 
 
-#----- Per-record report driver: metadata block (every column not in `skip_cols`), then the
-#      arm's own sections via `render_record(fh, row, index_of)`, then the record separator.
-#      Owning the separator here is what keeps the three enhance_* scripts to their sections -----#
+#----- Per record: metadata (every column not in `skip_cols`), `render_record`, the separator -----#
 def stream_records(annotated, output_path, skip_cols, render_record):
     index_of = _index_of(annotated)
     metadata_pairs = [(col, idx) for col, idx in index_of.items() if col not in skip_cols]
@@ -86,8 +76,7 @@ def stream_records(annotated, output_path, skip_cols, render_record):
             fh.write(f"\n{SEPARATOR}\n\n")
 
 
-# Duplex-string columns each renderer consumes. Kept beside the renderers so all
-# enhance_* scripts share one source of truth for their skip-lists and guards.
+# Duplex-string columns each renderer consumes.
 RNAHYBRID_DUPLEX_COLUMNS = ["Target_unmatches", "Target_matches", "miRNA_matches", "miRNA_unmatches"]
 INTARNA_DUPLEX_COLUMNS   = ["subseqDP", "hybridDP"]
 
@@ -120,3 +109,24 @@ def render_intarna_duplex(fh, row, index_of):
     fh.write(f"{LABEL_TARGET}{target_seq}{MARK_3PRIME}\n")
     fh.write(f"{LABEL_INDENT}{indicator}\n")
     fh.write(f"{LABEL_MIRNA}{query_display}{MARK_5PRIME}\n")
+
+
+_DUPLEX_COLUMNS = {render_rnahybrid_duplex: RNAHYBRID_DUPLEX_COLUMNS,
+                   render_intarna_duplex:   INTARNA_DUPLEX_COLUMNS}
+
+
+#----- One enhance report: metadata, the `sections` blocks, then each duplex after a blank line.
+#      The metadata skip set and the column guard both derive from `sections` and `renderers` -----#
+def write_report(annotated_csv_path, output_path, sections, renderers, label):
+    annotated = pd.read_csv(annotated_csv_path)
+    duplex_columns = [column for render in renderers for column in _DUPLEX_COLUMNS[render]]
+    require_columns(annotated, duplex_columns, label)
+    blocks = column_blocks(annotated, sections)
+
+    def render_record(fh, row, index_of):
+        write_blocks(fh, blocks, row)
+        for render in renderers:
+            fh.write("\n")
+            render(fh, row, index_of)
+
+    stream_records(annotated, output_path, set(duplex_columns).union(*sections), render_record)

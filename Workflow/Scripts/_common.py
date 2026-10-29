@@ -52,15 +52,15 @@ def iter_fasta_headers(path):
                 yield line[1:].strip()
 
 
-#----- The FASTA join key: the identifier before the first " [" attribute block -----#
+#----- The FASTA join key: the first whitespace-delimited token of the header, which is
+#      what RNAhybrid, IntaRNA and RNAcalibrate all report for a record -----#
 def parse_header_id(header):
-    return header.split(" [", 1)[0]
-
-
-#----- The per-miRNA key: the first whitespace-delimited token of the header. Spelled once
-#      because RNAcalibrate prints it in column 1 and rnahybrid.py must split files to match -----#
-def query_key(header):
     return header.split()[0]
+
+
+#----- The per-miRNA key. The same token, so rnahybrid.py splits query files to match
+#      RNAcalibrate's column 1 -----#
+query_key = parse_header_id
 
 
 #----- Ensures the parent directory of `path` exists; returns `path` as a Path for chaining -----#

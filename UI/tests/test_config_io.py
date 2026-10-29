@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # UI/ on path
@@ -55,3 +56,20 @@ def test_save_is_atomic_no_partial(tmp_path):
     config_io.save_config(p, {"a": 1})
     # no leftover temp files in the directory
     assert [x.name for x in tmp_path.iterdir()] == ["config.yaml"]
+
+def test_save_keeps_the_existing_files_mode(tmp_path):
+    # A temp file + os.replace used to hand config.yaml the temp file's 0600.
+    p = tmp_path / "config.yaml"
+    for mode in (0o644, 0o640):
+        p.write_text("a: 0\n")
+        p.chmod(mode)
+        config_io.save_config(p, {"a": 1})
+        assert p.stat().st_mode & 0o777 == mode
+
+def test_save_gives_a_new_file_the_umask_mode(tmp_path):
+    old = os.umask(0o027)
+    try:
+        config_io.save_config(tmp_path / "config.yaml", {"a": 1})
+    finally:
+        os.umask(old)
+    assert (tmp_path / "config.yaml").stat().st_mode & 0o777 == 0o640

@@ -88,7 +88,10 @@ pre-merge `genomes/` directory without needing `--force`.
   `lookup_error` (the NCBI call never completed), `no_assembly` (NCBI has no
   genome for that organism), `bad_accession` (a pin naming an assembly that does
   not exist), and `download_failed` (resolved, but the payload did not arrive —
-  what an unannotated `GCA_` pin with no CDS lands as).
+  what an unannotated `GCA_` pin with no CDS lands as, and what every accession
+  in a CDS batch of up to 200 lands as when that batch's download fails or its
+  NCBI package is corrupt; the run carries on and still writes `config.yaml`
+  and `prep_report.tsv`).
 - A trailing `# comment` on a pairs line is stripped, so a pinned line can say
   which strain an opaque accession is.
 - `prep_report.tsv` carries an `RNA_STATUS` column: `merged`, `cached`,

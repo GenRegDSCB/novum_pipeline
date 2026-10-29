@@ -4,11 +4,8 @@ import sys
 #----- Handle to the config file -----#
 configfile: "Config/config.yaml"
 
-#----- IntaRNA config schema + validation, imported before anything reads the config so a bad
-#      config fails at DAG-build time, before the hour-long RNAhybrid arm starts.
-#      _intarna_config is stdlib-only by contract: it is imported here into the Snakemake
-#      DRIVER env, which ships none of the arms' scientific deps. Never import a script that
-#      ends in run_from_snakemake() instead -----#
+#----- Stdlib-only config validators, imported into the driver env so a bad config fails at
+#      DAG-build time. Never import a script that ends in run_from_snakemake() here -----#
 sys.path.insert(0, os.path.join(workflow.basedir, "Workflow", "Scripts"))
 from _intarna_config import (
     ACCESSIBILITY_PU_FLOOR_KEYS,
@@ -18,15 +15,10 @@ from _intarna_config import (
     tool_config,
     validate_intarna_config,
 )
-
-#----- RNAcalibrate ladder schema + validation. Same contract as _intarna_config: stdlib
-#      only, imported here into the DRIVER env, so a bad ladder fails at DAG-build time
-#      rather than an hour into the arm -----#
 from _rnacalibrate_config import validate_rnacalibrate_config
 
-#----- Populate Snakefile variables with the config file. opt() wherever a default exists:
-#      an explicit YAML null reaches .get as None and would flow on as the string "None".
-#      Plain .get() only where null is itself meaningful — "all hits", --noSeed, ungated -----#
+#----- Config values: opt() wherever a default exists (an explicit YAML null would flow on as
+#      None), plain .get() where null is meaningful -----#
 targets             = config["targets"]
 rnacalibrate_config = config.get("rnacalibrate", {}) or {}
 rnahybrid_config    = config.get("rnahybrid", {}) or {}
@@ -42,8 +34,7 @@ intarna_max_hybrid_energy   = intarna_config.get("max_hybrid_energy")
 SAMPLE_DIR         = results_dir + "/{sample}"
 SAMPLE_VARIANT_DIR = SAMPLE_DIR + "/{variant}"
 
-#----- Per-sample query lookup: `queries:` mapping (keys must match `targets:`),
-#      with single `query: <path>` accepted as a legacy broadcast across all targets -----#
+#----- `queries:` keyed like `targets:`, or a legacy single `query:` broadcast to every target -----#
 def _resolve_queries(cfg, target_keys):
     queries_cfg = cfg.get("queries")
     if queries_cfg is not None:
@@ -63,13 +54,10 @@ def _resolve_queries(cfg, target_keys):
 queries = _resolve_queries(config, targets.keys())
 
 
-#----- The miRNA FASTA for this sample, named once instead of a `lambda wc:` respelled at
-#      every input slot below -----#
+#----- Per-sample miRNA query and CDS target FASTAs -----#
 def sample_query(wc):
     return queries[wc.sample]
 
-
-#----- The CDS FASTA for this sample -----#
 def sample_target(wc):
     return targets[wc.sample]
 
@@ -79,9 +67,7 @@ plots_type    = plots_config.get("type")
 plots_enabled = plots_type is not None
 plots_slug    = (plots_type or "none").replace(",", "-").replace(" ", "")
 
-#----- Variant axes: each arm has one boolean axis, encoded in the output tree as a
-#      (with, without) pair of sibling directory names. Naming each pair once is what keeps
-#      the wildcard regexes and the consensus fallback below from drifting apart -----#
+#----- Each arm's variant axis as a (with, without) pair of output directory names -----#
 W_CALIBRATION    = "w_calibration"
 WO_CALIBRATION   = "wo_calibration"
 W_ACCESSIBILITY  = "w_accessibility"
@@ -90,9 +76,7 @@ CALIBRATION_LITERALS   = (W_CALIBRATION,   WO_CALIBRATION)
 ACCESSIBILITY_LITERALS = (W_ACCESSIBILITY, WO_ACCESSIBILITY)
 VARIANT_LABELS = {W_CALIBRATION: "calibrated", WO_CALIBRATION: "uncalibrated"}
 
-#----- The one resolver both arms go through: read `key` from cfg (default "both"), coerce
-#      YAML 1.1's bare on/off back from bool, and expand on→with / off→without / both→both
-#      into the arm's directory literals, failing with the allowed set on anything else -----#
+#----- An arm's on/off/both key (bare YAML on/off arrives as a bool) to its directory literals -----#
 def variants_for(cfg, key, label, literals):
     with_literal, without_literal = literals
     mode = cfg.get(key, "both")
@@ -109,11 +93,10 @@ variants = variants_for(rnacalibrate_config, "calibration_variant",
 intarna_variants = variants_for(intarna_config, "accessibility_variant",
                                 "intarna.accessibility_variant", ACCESSIBILITY_LITERALS)
 
-#----- Fatal before anything else: a removed key left in a config is inert but looks live -----#
+#----- A removed config key is fatal: it is inert but looks live -----#
 reject_removed_keys(config)
 
-#----- One validation call, one emit site: every fatal and every warning lives in the
-#      driver-importable module, where each is unit-tested -----#
+#----- Validate both tool blocks: fatals raise, warnings are logged -----#
 for _warning in validate_intarna_config(
     intarna_config, shared_seed,
     rnahybrid_max_hybrid_energy=rnahybrid_max_hybrid_energy,
@@ -128,8 +111,7 @@ for _warning in validate_rnacalibrate_config(
 ):
     logger.warning(_warning)
 
-#----- A floor on --outNumber for the accessibility arm; opt() because an explicit null would
-#      otherwise reach the max() in intarna_outnumber -----#
+#----- --outNumber floor for the accessibility arm -----#
 intarna_search_depth = opt(intarna_config, "accessibility_search_depth",
                            INTARNA_DEFAULT_ACCESSIBILITY_SEARCH_DEPTH)
 
@@ -137,62 +119,57 @@ intarna_search_depth = opt(intarna_config, "accessibility_search_depth",
 RNAHYBRID_VARIANT_RE = "|".join(CALIBRATION_LITERALS)
 INTARNA_VARIANT_RE   = "|".join(ACCESSIBILITY_LITERALS)
 
-# Spelled once: rule rnacalibrate's output and calibration_input's return must agree, and a
-# divergence would surface as a missing-input error rather than as the wiring bug it is.
+#----- Shared by rule rnacalibrate's output and calibration_input -----#
 RNACALIBRATE_JSON = SAMPLE_DIR + "/" + W_CALIBRATION + "/rnacalibrate.json"
 
 
-#----- Every {variant} wildcard is one of the four arm literals. A safety net for rules added
-#      later: each rule below already narrows to its own arm's two, so nothing currently
-#      resolves through this union -----#
+#----- Every {variant} is one of the four arm literals; each rule narrows to its own arm's two -----#
 wildcard_constraints:
     variant = f"{RNAHYBRID_VARIANT_RE}|{INTARNA_VARIANT_RE}"
 
 
-#----- Per-variant calibration routing: supplies the JSON only for w_calibration, so a
-#      single rnahybrid rule serves both branches. Preserve the empty-list-vs-path
-#      contract — rnahybrid.py coerces `[]` to None to pick the broadcast branch -----#
+#----- The calibration JSON for w_calibration only. Keep `[]`, not None: rnahybrid.py reads
+#      an empty input as the uncalibrated branch -----#
 def calibration_input(wc):
     if wc.variant == W_CALIBRATION:
         return RNACALIBRATE_JSON.format(sample=wc.sample)
     return []
 
 
-#----- The one predicate every IntaRNA resolver below branches on. Under the per-rule
-#      INTARNA_VARIANT_RE constraint the variant is one of exactly two literals, so
-#      "accessibility on" and "!= wo_accessibility" coincide — spell it once -----#
+#----- species/distribution reach wo_calibration only: w_calibration ignores both, and params
+#      are a rerun trigger -----#
+def _uncalibrated_only(value):
+    return lambda wc: None if wc.variant == W_CALIBRATION else value
+
+rnahybrid_species      = _uncalibrated_only(rnahybrid_config.get("species", "3utr_human"))
+rnahybrid_distribution = _uncalibrated_only(rnahybrid_config.get("distribution"))
+
+
+#----- The predicate every IntaRNA resolver below branches on -----#
 def _accessibility_on(wc):
     return wc.variant == W_ACCESSIBILITY
 
 
-#----- Per-variant accessibility routing: resolve the {variant} wildcard to IntaRNA's
-#      --acc mode (N=none, C=constrained) here, mirroring calibration_input, so the
-#      script consumes a resolved knob instead of re-declaring the variant literal -----#
+#----- {variant} to IntaRNA's --acc mode (C = accessibility, N = none) -----#
 def intarna_acc_mode(wc):
     return "C" if _accessibility_on(wc) else "N"
 
 
-#----- --outMaxE filters TOTAL E, which equals E_hybrid only under acc=N. Emit it as a
-#      tool-level pre-filter exactly where that holds, and defer to tidy_intarna's
-#      E_hybrid gate under acc=C, where the same number would be a ~2x stricter bar -----#
+#----- --outMaxE bounds total E, which equals E_hybrid only under acc=N; under acc=C
+#      tidy_intarna gates on E_hybrid instead -----#
 def intarna_outmaxe(wc):
     return None if _accessibility_on(wc) else intarna_max_hybrid_energy
 
 
-#----- acc=C ranks by total E while the gate is on E_hybrid, so the strongest duplex can
-#      sit outside a top-1 list. Report deeper there and let tidy_intarna select. A floor,
-#      never a ceiling: a null shared knob means "all hits" and must not narrow to the
-#      depth — which is also why warning (e) tells the user only the cap can bound it -----#
+#----- acc=C ranks by total E, not the gated E_hybrid, so report deeper there. A floor, never
+#      a ceiling: null still means all hits -----#
 def intarna_outnumber(wc):
     if not _accessibility_on(wc) or shared_max_suboptimal_hits is None:
         return shared_max_suboptimal_hits
     return max(intarna_search_depth, shared_max_suboptimal_hits)
 
 
-#----- Per-side Pu floors: the mirror of intarna_outmaxe. That one withholds under acc=C;
-#      these withhold under acc=N, which computes no Pu at all — `accessibility_variant:
-#      both` must not carry a floor into the wo_ arm and empty it. One factory over the
-#      shared key table, so the two sides cannot drift from each other or from warning (h) -----#
+#----- Per-side Pu floors, withheld under acc=N, which computes no Pu -----#
 def _pu_floor_resolver(key):
     return lambda wc: intarna_config.get(key) if _accessibility_on(wc) else None
 
@@ -201,9 +178,7 @@ intarna_min_pu_target, intarna_min_pu_query = (
 )
 
 
-#----- Consensus arm-variant selection: prefer the w_* variant of each arm, fall back to
-#      wo_* when only that ran. Constants, not input functions: the choice reads the config
-#      and never the wildcards, so it genuinely resolves once at DAG-build time -----#
+#----- Consensus compares each arm's w_* variant, or wo_* when only that ran -----#
 def _preferred_variant(available, literals):
     with_literal, without_literal = literals
     return with_literal if with_literal in available else without_literal
@@ -244,17 +219,14 @@ rule rnacalibrate:
     conda:
         "Workflow/Envs/rnahybrid.yaml"
     threads:
-        # The per-miRNA invocations are independent (each is position 1 in its own RNG
-        # stream), so the split runs concurrently — this rule was the pipeline's single
-        # largest serial cost.
+        # per-miRNA calls are independent and run concurrently
         shared_threads
     params:
-        k=rnacalibrate_config.get("k", 10000),
+        k=opt(rnacalibrate_config, "k", 10000),
         max_target_length=max_target_length,
-        randomize_targets=rnacalibrate_config.get("randomize_targets", False),
+        randomize_targets=opt(rnacalibrate_config, "randomize_targets", False),
         rng_seed=rnacalibrate_config.get("rng_seed"),
-        # A param, so editing the ladder re-runs calibration; rule rnahybrid takes the JSON
-        # as an INPUT and follows. Exactly the two dependent rules.
+        # a ladder edit re-runs this rule, and rnahybrid through the JSON input
         length_anchors=rnacalibrate_config.get("length_anchors"),
         max_internal_loop=rnahybrid_config.get("max_internal_loop"),
         max_bulge_loop=rnahybrid_config.get("max_bulge_loop"),
@@ -275,14 +247,14 @@ rule rnahybrid:
     conda:
         "Workflow/Envs/rnahybrid.yaml"
     params:
-        species=rnahybrid_config.get("species", "3utr_human"),
+        species=rnahybrid_species,
         max_suboptimal_hits=shared_max_suboptimal_hits,
         max_internal_loop=rnahybrid_config.get("max_internal_loop"),
         max_bulge_loop=rnahybrid_config.get("max_bulge_loop"),
         max_hybrid_energy=rnahybrid_max_hybrid_energy,
         pvalue_threshold=rnahybrid_config.get("pvalue_threshold"),
         seed=shared_seed,
-        distribution=rnahybrid_config.get("distribution"),
+        distribution=rnahybrid_distribution,
         max_target_length=max_target_length
     threads:
         shared_threads
@@ -345,10 +317,8 @@ rule intarna:
     threads:
         shared_threads
     params:
-        # tool_config(), not the whole block: params are a rerun trigger, so handing this rule
-        # the downstream-only keys (the tidy gate, the per-side Pu floors) would make retuning
-        # a cheap tidy_intarna knob invalidate every intarna_output.csv.
-        intarna             = tool_config(intarna_config),
+        # tool keys only: a downstream-only key here would rerun IntaRNA on every edit
+        intarna           = tool_config(intarna_config),
         acc                 = intarna_acc_mode,
         max_suboptimal_hits = intarna_outnumber,
         out_max_energy      = intarna_outmaxe,
@@ -368,16 +338,13 @@ rule tidy_intarna:
     resources:
         mem_mb = 1200
     conda:
-        # postprocess, not intarna: this rule needs pandas and never invokes the binary,
-        # and pinning it here is what let intarna.yaml drop pandas entirely.
+        # needs pandas, never the IntaRNA binary
         "Workflow/Envs/postprocess.yaml"
     params:
-        # Authoritative gate on both variants: --outMaxE cannot express an E_hybrid bound
-        # under acc=C. Idempotent on wo_accessibility, where the tool already applied it.
+        # the authoritative E_hybrid gate on both variants
         max_hybrid_energy   = intarna_max_hybrid_energy,
         max_suboptimal_hits = shared_max_suboptimal_hits,
-        # Withheld under acc=N by the resolvers above; applied before the cap, so they
-        # select which site represents a pair rather than only rejecting the chosen one.
+        # withheld under acc=N; applied before the cap
         min_target_unpaired_probability = intarna_min_pu_target,
         min_query_unpaired_probability  = intarna_min_pu_query
     script:

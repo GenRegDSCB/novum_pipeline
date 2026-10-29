@@ -59,12 +59,10 @@ def _list_dir(directory: Path) -> list[dict]:
 class API:
     def __init__(self) -> None:
         self._lock = Lock()
-        self._log_fh = None
         self._set_run(None)
 
-    #----- The whole run state, set in one place: idle when `proc` is None, otherwise a
-    #      fresh run with the clock started. `_finished_at` doubles as the "already
-    #      harvested this exit" latch, and the exit code is read off the Popen -----#
+    #----- The whole run state, set in one place: idle when `proc` is None, otherwise a fresh run
+    #      with the clock started. `_finished_at` doubles as the "already harvested" latch -----#
     def _set_run(self, proc: "subprocess.Popen | None") -> None:
         self._proc = proc
         self._started_at: float | None = time.time() if proc else None
@@ -97,15 +95,6 @@ class API:
     def _is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
-    #----- Flush and drop the log handle; safe to call more than once -----#
-    def _close_log(self) -> None:
-        if self._log_fh is not None:
-            try:
-                self._log_fh.flush()
-                self._log_fh.close()
-            finally:
-                self._log_fh = None
-
     #----- Last `max_lines` of the run log, so a failure can be read in-app instead of
     #      sending the user back to the launcher terminal. Only the final `max_bytes` are
     #      read, so a long run's log is never slurped whole; the leading partial line is
@@ -133,19 +122,19 @@ class API:
             save_result = self.save_config(config)
             if not save_result["ok"]:
                 return save_result
+            # Harvest a previous run that exited unpolled, so a failed launch reads as idle.
+            self._set_run(None)
             try:
                 LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-                self._log_fh = LOG_PATH.open("w", buffering=1)
-                # Adopted only once Popen succeeds, so a failed launch cannot leave the
-                # previous run's handle in place for the next status poll to report.
-                proc = subprocess.Popen(
-                    ["snakemake", "--use-conda", "--cores", "all"],
-                    cwd=str(ROOT),
-                    stdout=self._log_fh,
-                    stderr=subprocess.STDOUT,
-                )
+                # The child gets its own copy of the fd, so the parent's closes at launch.
+                with LOG_PATH.open("w") as log:
+                    proc = subprocess.Popen(
+                        ["snakemake", "--use-conda", "--cores", "all"],
+                        cwd=str(ROOT),
+                        stdout=log,
+                        stderr=subprocess.STDOUT,
+                    )
             except FileNotFoundError as exc:
-                self._close_log()
                 return {"ok": False, "error": f"snakemake not found on PATH ({exc})"}
             self._set_run(proc)
             return {
@@ -170,7 +159,6 @@ class API:
 
             if self._finished_at is None:          # first poll after the process exited
                 self._finished_at = time.time()
-                self._close_log()
 
             code = self._proc.returncode
             state = "cancelled" if self._cancelled else "succeeded" if code == 0 else "failed"
@@ -210,11 +198,8 @@ class API:
 
 #----- Builds the PyWebView window, wires the min-width snap-back, and starts the Qt loop -----#
 def main() -> None:
-    # Width has a floor (the cards break below it); height is left unconstrained so the
-    # user can collapse the window vertically as far as they want.
-    # DERIVED, not independent: the cards break at ~768 CSS px, and `html { zoom }` scales
-    # CSS px to device px, so this floor is 768 x --ui-zoom (tokens.css). Retune it if you
-    # change --ui-zoom, or the window will stop shrinking at the wrong width.
+    # Width floor only: the cards break at ~768 CSS px, so this is 768 x --ui-zoom
+    # (tokens.css). Retune it whenever --ui-zoom changes.
     min_w = 960
     window = webview.create_window(
         "Novum Pipeline",
@@ -225,10 +210,8 @@ def main() -> None:
         min_size=(min_w, 1),
     )
 
-    #----- Snaps sub-floor widths back to min_w, debounced so the correction fires once -----#
-    # Firing on every resize during a drag makes the window drift in the pull direction,
-    # since each resize() re-anchors to the just-moved top-left; waiting for the drag to
-    # settle gives one clean correction.
+    #----- Snaps sub-floor widths back to min_w, debounced: resizing mid-drag makes the
+    #      window drift in the pull direction -----#
     timer: Timer | None = None
 
     def _snap_back(width, _height, *_args) -> None:
@@ -262,16 +245,9 @@ def main() -> None:
 
     window.events.resized += _snap_back
 
-    # Force the Qt backend on Linux: the GTK backend needs system PyGObject
-    # (`python3-gi`), which conda envs don't see. PyQt5 + QtWebEngineWidgets
-    # ship via pip into the env and Just Work.
-    # private_mode=False: pywebview's default builds an off-the-record QWebEngineProfile,
-    # which drops localStorage between launches — so the theme toggle (app.jsx writes
-    # `np:theme`) could never actually persist. A named profile also pins the local server
-    # to a fixed port, letting the HTTP and V8 code caches survive a restart and take some
-    # of the in-browser Babel compile off startup.
-    # Flip ``debug=True`` for the rare React debugging session — it both opens
-    # DevTools at startup and adds the right-click → Inspect Element entry.
+    # Qt, because GTK needs a system PyGObject conda envs can't see. private_mode=False keeps
+    # localStorage (the theme toggle) and the code caches across launches. debug=True opens
+    # DevTools.
     webview.start(gui="qt", debug=False, private_mode=False)
 
 

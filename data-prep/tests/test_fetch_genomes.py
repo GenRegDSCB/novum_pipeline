@@ -3,15 +3,19 @@ from __future__ import annotations
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import contextlib
+import errno
 import gzip
 import io
 import tempfile
 import zipfile
 import zlib
 from pathlib import Path
+from unittest import mock
 
 import requests
 
+import fetch_genomes
 from fetch_genomes import (assembly_stem, rna_ftp_url, target_dest, append_gz_fasta,
                            download_targets, _resolve_one, _API_BASE, resolve_assemblies)
 
@@ -320,6 +324,172 @@ def test_download_targets_skips_rna_when_cds_missing_from_zip():
     assert paths == {"t": None}
     assert s.gets == []                                   # RNA fetch skipped entirely
     assert list(d.glob("*")) == []                         # nothing written for this accession
+
+
+#----- download failures: recorded per accession, no temp ZIP outlives the call -----#
+
+class _Abort(BaseException):
+    """Anything that is not a download failure — e.g. Ctrl-C mid-run."""
+
+
+class _BatchSession(_StubSession):
+    """One POST outcome per batch, in order: ZIP bytes, an HTTP status, or an exception."""
+    def __init__(self, batches, rna_gz=None):
+        super().__init__(rna_gz=rna_gz)
+        self.batches = list(batches)
+
+    def post(self, url, **kw):
+        self.posts.append(url)
+        outcome = self.batches.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if isinstance(outcome, _Resp):
+            return outcome
+        return _Resp(outcome) if isinstance(outcome, int) else _Resp(200, outcome)
+
+
+class _CutStream(_Resp):
+    """A 200 whose body breaks off with `exc` after the first chunk."""
+    def __init__(self, exc):
+        super().__init__(200, b"PK\x03\x04partial")
+        self.exc = exc
+
+    def iter_content(self, chunk_size=1):
+        yield self._body
+        raise self.exc
+
+
+_REAL_NAMED_TEMPFILE = tempfile.NamedTemporaryFile
+
+
+class _FullDisk:
+    """A temp file whose last flush fails on close, as it does on a full disk."""
+    def __init__(self, **kw):
+        self._fh = _REAL_NAMED_TEMPFILE(**kw)
+        self.name, self.write = self._fh.name, self._fh.write
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._fh.close()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+
+@contextlib.contextmanager
+def _one_accession_per_batch():
+    """Batch size 1, and every temp file redirected into a fresh dir the test can inspect."""
+    tmp = Path(tempfile.mkdtemp())
+    with mock.patch.object(tempfile, "tempdir", str(tmp)), \
+            mock.patch.object(fetch_genomes, "_BATCH_SIZE", 1):
+        yield tmp
+
+
+_TWO_HITS = {"a": ("GCF_1.1", "ASM1"), "b": ("GCF_2.2", "ASM2")}
+
+
+def test_a_failed_batch_is_recorded_and_the_others_still_land():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([_cds_zip("GCF_1.1", ">lcl|X_cds_1\nAAAA\n"), 400])
+    with _one_accession_per_batch() as tmp:
+        paths, status = download_targets(_TWO_HITS, d, s, delay=0)
+    assert status == {"a": "missing", "b": "-"}
+    assert Path(paths["a"]).read_text() == ">lcl|X_cds_1\nAAAA\n"
+    assert paths["b"] is None
+    assert list(tmp.iterdir()) == []                      # batch 1's ZIP did not leak
+
+
+def test_a_failed_first_batch_does_not_stop_the_later_ones():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([requests.ConnectionError("reset"),
+                       _cds_zip("GCF_2.2", ">lcl|Y_cds_1\nCCCC\n")])
+    with _one_accession_per_batch() as tmp:
+        paths, status = download_targets(_TWO_HITS, d, s, delay=0)
+    assert status == {"a": "-", "b": "missing"}
+    assert paths["a"] is None and Path(paths["b"]).exists()
+    assert list(tmp.iterdir()) == []
+
+
+def test_an_interrupted_download_deletes_the_zips_already_streamed():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([_cds_zip("GCF_1.1", ">lcl|X_cds_1\nAAAA\n"), _Abort()])
+    with _one_accession_per_batch() as tmp:
+        try:
+            download_targets(_TWO_HITS, d, s, delay=0)
+        except _Abort:
+            pass
+        else:
+            raise AssertionError("a non-download error must still propagate")
+        assert list(tmp.iterdir()) == []
+
+
+def test_an_abort_mid_stream_deletes_the_zip_being_written():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([_cds_zip("GCF_1.1", ">lcl|X_cds_1\nAAAA\n"), _CutStream(_Abort())])
+    with _one_accession_per_batch() as tmp:
+        try:
+            download_targets(_TWO_HITS, d, s, delay=0)
+        except _Abort:
+            pass
+        else:
+            raise AssertionError("a non-download error must still propagate")
+        assert list(tmp.iterdir()) == []                  # neither batch 1's nor batch 2's
+
+
+def test_a_zip_that_fails_to_close_is_recorded_and_deleted():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([_cds_zip("GCF_1.1", ">lcl|X_cds_1\nAAAA\n"),
+                       _cds_zip("GCF_2.2", ">lcl|Y_cds_1\nCCCC\n")])
+    with _one_accession_per_batch() as tmp, \
+            mock.patch.object(tempfile, "NamedTemporaryFile", _FullDisk):
+        paths, status = download_targets(_TWO_HITS, d, s, delay=0)
+    assert status == {"a": "-", "b": "-"}
+    assert list(tmp.iterdir()) == []
+
+
+def test_an_interrupted_extraction_deletes_every_zip():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([_cds_zip("GCF_1.1", ">lcl|X_cds_1\nAAAA\n"),
+                       _cds_zip("GCF_2.2", ">lcl|Y_cds_1\nCCCC\n")])
+    with _one_accession_per_batch() as tmp, \
+            mock.patch.object(fetch_genomes.shutil, "copyfileobj", side_effect=_Abort):
+        try:
+            download_targets(_TWO_HITS, d, s, delay=0)
+        except _Abort:
+            pass
+        assert list(tmp.iterdir()) == []                  # batch 2's ZIP was never reached
+
+
+def test_a_corrupt_package_is_recorded_and_leaks_nothing():
+    d = Path(tempfile.mkdtemp())
+    s = _BatchSession([b"not a zip", _cds_zip("GCF_2.2", ">lcl|Y_cds_1\nCCCC\n")])
+    with _one_accession_per_batch() as tmp:
+        paths, status = download_targets(_TWO_HITS, d, s, delay=0)
+    assert status == {"a": "-", "b": "missing"}
+    assert list(tmp.iterdir()) == []
+
+
+def _crc_broken_zip(pairs):
+    """A stored (uncompressed) ZIP whose member holding "BADSEQ" fails its CRC on read."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for acc, text in pairs:
+            zf.writestr(f"ncbi_dataset/data/{acc}/cds_from_genomic.fna", text)
+    data = bytearray(buf.getvalue())
+    i = data.index(b"BADSEQ")
+    data[i] = ord("b")
+    return bytes(data)
+
+
+def test_a_member_failing_mid_read_is_recorded_and_leaves_no_part():
+    d = Path(tempfile.mkdtemp())
+    zip_bytes = _crc_broken_zip([("GCF_1.1", ">lcl|X_cds_1\nBADSEQ\n"),
+                                 ("GCF_2.2", ">lcl|Y_cds_1\nCCCC\n")])
+    s = _StubSession(zip_bytes, rna_gz=None)
+    paths, status = download_targets(_TWO_HITS, d, s, delay=0)
+    assert status == {"a": "-", "b": "missing"}
+    assert paths["a"] is None
+    assert list(d.glob("*.part")) == []
 
 
 #----- _resolve_one: taxon-name search vs accession pin -----#

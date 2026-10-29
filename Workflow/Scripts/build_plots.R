@@ -19,9 +19,10 @@ variant_labels <- snakemake@params$variant_labels
 per_mirna_top_n <- as.integer(snakemake@params$per_mirna_top_n %||% 12L)
 
 
-#----- Read each variant CSV, tagging it with the label provided by Snakemake -----#
+#----- Read each variant CSV, tagging it with the label provided by Snakemake. trim_ws off:
+#      the four duplex strings are space-padded into column alignment -----#
 read_one <- function(path, label) {
-  read_csv(path, show_col_types = FALSE) |> mutate(Calibration = label)
+  read_csv(path, show_col_types = FALSE, trim_ws = FALSE) |> mutate(Calibration = label)
 }
 
 merged <- map2(snakemake@input$annotated, variant_labels, read_one) |>
@@ -332,11 +333,9 @@ plot_position_density <- function() {
     theme_bw(base_size = basesize)
 }
 
-#----- Canonical-seed classification (6mer / 7mer-A1 / 7mer-m8 / 8mer / none).
-# RNAhybrid prints miRNA 3'->5' left-to-right, so the rightmost miRNA-bearing
-# column is nt 1 (5' end). Walking leftward over miRNA-present columns
-# (matches OR unmatches non-space) enumerates nt 2, 3, ..., 8 and skips
-# target-bulge columns where the miRNA strand is empty. -----#
+#----- Canonical-seed class (6mer / 7mer-A1 / 7mer-m8 / 8mer / none). The miRNA prints 3'->5',
+#      so nt 1 is the rightmost miRNA-bearing column; walking left over those columns yields
+#      nt 2..8 and skips target bulges -----#
 classify_seed_row <- function(m_matches, m_unmatches, t_matches, t_unmatches) {
   mm <- strsplit(m_matches,   "", fixed = TRUE)[[1]]
   mu <- strsplit(m_unmatches, "", fixed = TRUE)[[1]]
@@ -438,9 +437,7 @@ if (n == 0) {
 
 
 #----- Compose & save -----#
-# Equal column widths everywhere. n <= 3 stays in a single row at legacy widths
-# (9.5 / 12 / 18 inches). n > 3 wraps onto 3 columns x ceil(n/3) rows; partial
-# last rows are padded with plot_spacer() to keep column widths uniform.
+# Equal column widths: one row up to n = 3, else 3 columns with plot_spacer() padding.
 if (n == 1) {
   combined   <- plots[[1]]
   out_width  <- 9.5

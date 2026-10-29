@@ -47,6 +47,10 @@ _DEFAULT_USER_AGENT = "ncbi-cds-downloader/1.0"
 # The CDS set NCBI ships inside each ncbi_dataset/data/<accession>/ directory.
 _CDS_FILENAME = "cds_from_genomic.fna"
 
+# A corrupt gzip/deflate stream transfers cleanly and fails only on read, raising EOFError or
+# zlib.error, neither of which subclasses OSError.
+_CORRUPT_STREAM_ERRORS = (OSError, EOFError, zlib.error)
+
 # Accessions per POST /genome/download. Bacterial CDS sets are small; this bounds
 # how much NCBI packages server-side in one request.
 _BATCH_SIZE = 200
@@ -195,7 +199,7 @@ def append_gz_fasta(part_path, gz_path) -> int:
     return records
 
 
-#----- Yields (accession, open member) for each matching file in the ZIPs; deletes each ZIP when done -----#
+#----- Yields (accession, open member) for each matching file in the ZIPs -----#
 def iter_package_members(zip_paths, filename):
     for zip_path in zip_paths:
         try:
@@ -207,37 +211,48 @@ def iter_package_members(zip_paths, filename):
                             and parts[1] == "data" and parts[3] == filename):
                         with zf.open(member) as src:
                             yield parts[2], src
-        finally:
-            zip_path.unlink(missing_ok=True)
+        except zipfile.BadZipFile as exc:
+            # A corrupt package drops only the accessions it holds.
+            print(f"    unreadable CDS package skipped: {exc}")
 
 
-#----- Extracts each accession's cds_from_genomic.fna from the batched ZIPs into a <stem>.part file -----#
+#----- Extracts each accession's cds_from_genomic.fna from the batched ZIPs into a <stem>.part
+#      file. The ZIPs live in one temp dir, so every exit path removes them -----#
 def _download_cds_parts(accessions, asm_by_acc, out_dir, session):
     parts: dict[str, Path] = {}
-    zip_paths = download_batch(accessions, session)
-    for acc, src in iter_package_members(zip_paths, _CDS_FILENAME):
-        asm = asm_by_acc.get(acc)
-        if asm is None:
-            continue
-        # Staged as .part so an interrupted run can't leave a half-merged
-        # file the next run mistakes for complete.
-        part = out_dir / f"{assembly_stem(acc, asm)}.part"
-        with part.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-        parts[acc] = part
+    with tempfile.TemporaryDirectory() as zip_dir:
+        zip_paths = download_batch(accessions, session, zip_dir)
+        for acc, src in iter_package_members(zip_paths, _CDS_FILENAME):
+            asm = asm_by_acc.get(acc)
+            if asm is None:
+                continue
+            # Staged as .part so an interrupted run can't leave a half-merged
+            # file the next run mistakes for complete.
+            part = out_dir / f"{assembly_stem(acc, asm)}.part"
+            try:
+                with part.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            except (*_CORRUPT_STREAM_ERRORS, zipfile.BadZipFile) as exc:
+                # A member failing mid-read (bad CRC, truncated deflate) drops only its accession.
+                part.unlink(missing_ok=True)
+                print(f"    CDS extract failed for {acc}: {exc.__class__.__name__}")
+                continue
+            parts[acc] = part
     return parts
 
 
 #----- Streams a response body to a temp file the caller owns; self-cleans a failed transfer -----#
-def _stream_to_tempfile(response, suffix: str) -> Path:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as fh:
-        path = Path(fh.name)
-        try:
+def _stream_to_tempfile(response, suffix: str, dir=None) -> Path:
+    fh = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=dir)
+    path = Path(fh.name)
+    try:
+        # The close is inside the try: its final flush can fail too (a full disk).
+        with fh:
             for chunk in response.iter_content(chunk_size=1 << 20):  # 1 MiB
                 fh.write(chunk)
-        except Exception:
-            path.unlink(missing_ok=True)
-            raise
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     return path
 
 
@@ -255,9 +270,7 @@ def _append_rna(part, acc, asm, session):
         tmp = _stream_to_tempfile(r, ".gz")
         append_gz_fasta(part, tmp)
         return "merged"
-    except (requests.RequestException, OSError, EOFError, zlib.error) as exc:
-        # A corrupt gzip transfers cleanly and fails only in the reader, raising
-        # EOFError/zlib.error — neither subclasses OSError, so both need naming.
+    except (requests.RequestException, *_CORRUPT_STREAM_ERRORS) as exc:
         # The URL is printed so a derivation bug can't look like "NCBI has no RNA".
         print(f"    RNA fetch failed for {acc}: {exc.__class__.__name__} — {url}")
         return "error"
@@ -352,22 +365,27 @@ def make_session(api_key: str | None = None, contact_email: str | None = None) -
     return s
 
 
-#----- Bulk-downloads accessions in batches via POST /genome/download, streaming each ZIP to a temp file -----#
-def download_batch(accessions: list[str], session: requests.Session) -> list[Path]:
+#----- POSTs accessions to /genome/download in batches, each ZIP into `zip_dir`; skips a failed batch -----#
+def download_batch(accessions: list[str], session: requests.Session, zip_dir) -> list[Path]:
     zip_paths: list[Path] = []
     n_batches = (len(accessions) + _BATCH_SIZE - 1) // _BATCH_SIZE
     for b, start in enumerate(range(0, len(accessions), _BATCH_SIZE), 1):
         chunk = accessions[start : start + _BATCH_SIZE]
         print(f"  Batch {b}/{n_batches}: {len(chunk)} accessions ...", flush=True)
-        r = session.post(
-            f"{_API_BASE}/genome/download",
-            json={"accessions": chunk, "include_annotation_type": ["CDS_FASTA"]},
-            stream=True,
-            timeout=600,
-        )
-        r.raise_for_status()
-        # Stream to disk rather than buffering: one batch is up to 200 CDS sets.
-        zip_paths.append(_stream_to_tempfile(r, ".zip"))
+        try:
+            r = session.post(
+                f"{_API_BASE}/genome/download",
+                json={"accessions": chunk, "include_annotation_type": ["CDS_FASTA"]},
+                stream=True,
+                timeout=600,
+            )
+            r.raise_for_status()
+            # Stream to disk rather than buffering: one batch is up to 200 CDS sets.
+            zip_paths.append(_stream_to_tempfile(r, ".zip", dir=zip_dir))
+        except (requests.RequestException, OSError) as exc:
+            # Its accessions never land, so the report records them as download_failed.
+            print(f"    batch {b} failed, {len(chunk)} accessions skipped: "
+                  f"{exc.__class__.__name__} — {exc}")
     return zip_paths
 
 

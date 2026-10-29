@@ -6,8 +6,11 @@ from _common import iter_fasta_headers, parse_header_id, ensure_parent
 
 
 # Extracts key/value pairs from FASTA headers like:
-# [gene=thrL] [locus_tag=b0001] [protein=thr operon leader peptide]
-FIELD_RE = re.compile(r"\[([^=\]]+)=([^\]]*)\]")
+# [gene=hscA] [locus_tag=b2526] [protein=[Fe-S] cluster biosynthesis chaperone HscA]
+# A value may hold balanced brackets nested two deep; an unbalanced one fails its own match only.
+_PLAIN = r"[^\[\]]"
+_NESTED = rf"\[(?:{_PLAIN}|\[{_PLAIN}*\])*\]"
+FIELD_RE = re.compile(rf"\[([^\s=\[\]]+)=((?:{_PLAIN}|{_NESTED})*)\]")
 
 # Output column → the FASTA attribute keys feeding it, first non-empty wins. intersect.py
 # imports ANNOTATION_COLUMNS so the consensus schema cannot drift from what this rule emits.

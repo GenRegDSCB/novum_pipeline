@@ -208,3 +208,51 @@ def test_job_spec_raises_naming_the_missing_query_and_anchor(tmp_path):
             chunks=[(tmp_path / "chunk_000000", 76), (tmp_path / "chunk_000001", 900)],
             tsv_path=tmp_path / "spec.tsv",
         )
+
+
+# --- species / distribution: rule rnahybrid hands both as None to w_calibration ---
+
+@pytest.fixture
+def dispatched(monkeypatch):
+    # Stands in for GNU Parallel: records each command and the job spec, writes one output.
+    calls = []
+    def fake_run(command, check, env):
+        spec = Path(command[command.index("::::") + 1]) if "::::" in command else None
+        calls.append((command, spec.read_text() if spec else None))
+        Path(env["RNAHYBRID_OUT_DIR"], "output_q__chunk_000000.tsv").write_text("hit\n")
+    monkeypatch.setattr(rnahybrid, "ensure_dependencies", lambda: "parallel")
+    monkeypatch.setattr(rnahybrid.subprocess, "run", fake_run)
+    return calls
+
+def _run(tmp_path, **kwargs):
+    query, target = tmp_path / "q.fa", tmp_path / "t.fna"
+    query.write_text(">miR-1\nUGAGGUAG\n")
+    target.write_text(_record("gene", 50))
+    output = tmp_path / "out" / "rnahybrid_output.tsv"
+    rnahybrid.run_rnahybrid(query=query, target=target, output_file=output,
+                            max_target_length=50000, **kwargs)
+    return output
+
+def test_calibrated_run_needs_neither_species_nor_distribution(tmp_path, dispatched):
+    output = _run(tmp_path, species=None, distribution=None,
+                  distribution_file=_write_calibration(tmp_path, LADDERED))
+    [(command, spec)] = dispatched
+    worker_call = command[command.index("--colsep") + 2]
+    assert "--species" not in worker_call and " -d " not in worker_call
+    assert spec.split("\t")[1] == "2.550000,0.253200"      # the 76 cell's own xi/theta
+    assert output.read_text() == "hit\n"
+
+def test_broadcast_run_still_takes_species_when_distribution_is_none(tmp_path, dispatched):
+    _run(tmp_path, species="3utr_human", distribution=None)
+    [(command, _spec)] = dispatched
+    assert command[-2:] == [":::", "3utr_human"] and "--species {4}" in command[2]
+
+def test_broadcast_run_still_takes_distribution_when_species_is_none(tmp_path, dispatched):
+    _run(tmp_path, species=None, distribution="1.0,0.5")
+    [(command, _spec)] = dispatched
+    assert "--species" not in command[2] and "-d 1.0,0.5" in command[2]
+
+def test_broadcast_run_rejects_neither_species_nor_distribution(tmp_path, dispatched):
+    with pytest.raises(ValueError, match="species"):
+        _run(tmp_path, species=None, distribution=None)
+    assert dispatched == []

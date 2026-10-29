@@ -124,6 +124,47 @@ def test_failed_run_carries_the_log_tail_and_success_does_not(api, monkeypatch):
     assert "log_tail" not in api2.pipeline_status()
 
 
+@pytest.fixture
+def launchable(tmp_path, monkeypatch):
+    # run_pipeline with the save, the log path and Popen stubbed; returns the procs launched.
+    launched: list[FakePopen] = []
+
+    def popen(*_a, stdout=None, **_k):
+        launched.append(FakePopen(pid=len(launched) + 1))
+        launched[-1].stdout = stdout
+        return launched[-1]
+
+    monkeypatch.setattr(launcher.API, "save_config", lambda self, cfg: {"ok": True})
+    monkeypatch.setattr(launcher, "LOG_PATH", tmp_path / ".pipeline.log")
+    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
+    return launched
+
+
+def test_the_parent_holds_no_handle_on_the_run_log(api, launchable):
+    # The child writes through its own copy of the fd; nothing is left for the parent to close.
+    assert api.run_pipeline({})["ok"] is True
+    assert launchable[0].stdout.closed
+
+
+def test_relaunch_after_a_run_that_exited_unpolled(api, launchable):
+    assert api.run_pipeline({})["ok"] is True
+    launchable[0].finish(0)
+    assert api.run_pipeline({})["ok"] is True
+    assert api.pipeline_status()["pid"] == launchable[1].pid
+
+
+def test_failed_relaunch_does_not_resurrect_the_previous_run(api, launchable, monkeypatch):
+    api.run_pipeline({})
+    launchable[0].finish(1)
+
+    def missing(*_a, **_k):
+        raise FileNotFoundError("snakemake")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", missing)
+    assert api.run_pipeline({})["ok"] is False
+    assert api.pipeline_status() == {"state": "idle"}
+
+
 def test_list_dir_paths_are_root_relative_posix(tmp_path, monkeypatch):
     # The `path` written here goes straight into config.yaml, so it must stay relative to
     # the repo root and POSIX-shaped whatever the platform.

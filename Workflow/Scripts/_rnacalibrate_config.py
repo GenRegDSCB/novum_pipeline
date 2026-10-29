@@ -77,9 +77,9 @@ def fitted_anchors(anchors):
 
 
 #----- (a) Without -s there is no RNG and -l is dropped entirely (verified inert), so every
-#      anchor would hold bit-identical numbers -----#
-def _reject_ladder_without_shuffling(anchors, cfg):
-    if not cfg.get("randomize_targets"):
+#      anchor would hold bit-identical numbers. Fatal only if calibration runs, else (d) -----#
+def _reject_ladder_without_shuffling(anchors, cfg, calibration_on):
+    if calibration_on and not cfg.get("randomize_targets"):
         raise ValueError(
             "rnacalibrate.length_anchors is set but randomize_targets is false. Without "
             "-s there is no RNG and RNAcalibrate drops -l entirely, so every anchor would "
@@ -147,7 +147,7 @@ def validate_rnacalibrate_config(cfg, calibration_on=True):
 
     # Every fatal runs before any warning is collected — a warning list a raise discards
     # is wasted work.
-    _reject_ladder_without_shuffling(anchors, cfg)
+    _reject_ladder_without_shuffling(anchors, cfg, calibration_on)
     _reject_too_few_fitted_anchors(anchors)
 
     return (

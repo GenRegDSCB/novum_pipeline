@@ -11,11 +11,14 @@ Three invariants:
 3. The rnacalibrate block round-trips through the REAL hydrateConfig -> configToObject pair.
    F1 broke this: the emit line, the hydrate line, and INITIAL_CONFIG's default can each go
    missing independently, and only executing the real JS catches all three.
+4. What the form and App actually do with a value — a typed float, a failed load — read off
+   the real .jsx, transpiled by the vendored Babel.
 
 Most of this file bracket-matches data.js/config.js rather than running a JS engine — they
 are plain `window.X = {...}` assignments and the repo has no Node *build* dependency. The
-round-trip tests are the exception: they shell out to `node` (see _js_roundtrip.js), because
-comparing source text cannot catch a behavioural break.
+round-trip and component tests are the exception: they shell out to `node` (see
+_js_roundtrip.js and _jsx_harness.js), because comparing source text cannot catch a
+behavioural break.
 """
 
 from __future__ import annotations
@@ -37,14 +40,16 @@ import _rnacalibrate_config
 
 NODE = shutil.which("node")
 JS_ROUNDTRIP_HARNESS = Path(__file__).resolve().parent / "_js_roundtrip.js"
+JSX_HARNESS = Path(__file__).resolve().parent / "_jsx_harness.js"
+needs_node = pytest.mark.skipif(NODE is None, reason="node not found on PATH")
 
 # Every intarna sub-block that is both a UI block and a nested mapping in config.yaml.
 # `top` is excluded here — its keys live at the intarna level, so it has its own pair of
 # tests below rather than a nested mapping to compare against.
 BLOCKS = ["helix", "seed", "accessibility", "output"]
 
-# The intarna-level keys config.js writes by hand, outside INTARNA_BLOCKS.top.
-INTARNA_TOP_LITERALS = ("accessibility_variant", "prediction_mode", "model", "energy_set")
+def _shipped_config():
+    return yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
 
 
 def _data_js_source():
@@ -103,7 +108,7 @@ def _initial_config_keys(name):
 
 
 def _config_yaml_keys(name):
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     return list(cfg["intarna"][name].keys())
 
 
@@ -126,13 +131,11 @@ def test_initial_config_has_every_editable_block_key(block):
 
 
 def test_ui_top_block_matches_config_yaml_scalars():
-    # configToObject rebuilds obj.intarna wholesale from INTARNA_TOP_LITERALS plus
-    # INTARNA_BLOCKS.top, and save_config dumps that object over the file — so an
-    # intarna-level key in neither is DELETED the first time the editor saves, silently,
-    # because absent and null mean the same thing everywhere downstream.
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    # configToObject rebuilds obj.intarna wholesale from INTARNA_BLOCKS and save_config dumps
+    # it over the file, so an intarna-level key missing here is silently DELETED on save.
+    cfg = _shipped_config()
     scalars = [key for key, value in cfg["intarna"].items()
-               if not isinstance(value, dict) and key not in INTARNA_TOP_LITERALS]
+               if not isinstance(value, dict)]
     assert _block_keys("top") == scalars
 
 
@@ -143,14 +146,14 @@ def test_config_block_matches_config_yaml(block):
     # exactly how `rng_seed` went missing (F1), after which the next UI-launched run went
     # unpinned with no error or warning. They are table-driven now, so one assertion per
     # section covers both directions: config.js walks CONFIG_BLOCKS to emit AND to hydrate.
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     assert _block_keys(block, "CONFIG_BLOCKS") == list(cfg[block].keys())
 
 
 def test_shared_block_matches_config_yaml_top_level():
     # `shared` emits at the top level rather than into a mapping of its own, so assert the
     # keys sit contiguously and in order where configToObject writes them (after `threads`).
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     top = list(cfg.keys())
     keys = _block_keys("shared", "CONFIG_BLOCKS")
     start = top.index(keys[0])
@@ -171,7 +174,7 @@ def _run_js_roundtrip(raw):
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(NODE is None, reason="node not found on PATH")
+@needs_node
 @pytest.mark.parametrize("rng_seed", [1, 0, None])
 def test_rnacalibrate_block_round_trips_through_the_real_js(rng_seed):
     # Catches the three breaks the emit-direction test above cannot: a missing hydrate line
@@ -180,19 +183,19 @@ def test_rnacalibrate_block_round_trips_through_the_real_js(rng_seed):
     # INITIAL_CONFIG (hydrateConfig throws, blanking the UI).
     # All three params matter: null means "don't pin" not "unset", 0 guards falsy-collapse,
     # and null alone cannot detect a deleted hydrate line (its fallback emits null too).
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     cfg["rnacalibrate"]["rng_seed"] = rng_seed
     out = _run_js_roundtrip(cfg)
     assert out["obj"]["rnacalibrate"] == cfg["rnacalibrate"]
 
 
-@pytest.mark.skipif(NODE is None, reason="node not found on PATH")
+@needs_node
 @pytest.mark.parametrize("anchors", ["80,200,500,1200", None])
 def test_length_anchors_null_survives_the_round_trip(anchors):
     # null is meaningful — it turns the ladder off and restores the pre-branch whole-file
     # fit — so the serializer must not read it as "absent" and re-emit the INITIAL_CONFIG
     # default. The OFF_DEFAULT test below never passes None, so only this case catches it.
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     cfg["rnacalibrate"]["length_anchors"] = anchors
     out = _run_js_roundtrip(cfg)
     assert out["obj"]["rnacalibrate"]["length_anchors"] == anchors
@@ -210,11 +213,11 @@ OFF_DEFAULT = {
 }
 
 
-@pytest.mark.skipif(NODE is None, reason="node not found on PATH")
+@needs_node
 @pytest.mark.parametrize("block", sorted(OFF_DEFAULT))
 def test_config_blocks_round_trip_off_default_values(block):
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
-    # rnahybrid.distribution is forced null while calibration runs, so read it with
+    cfg = _shipped_config()
+    # rnahybrid.distribution is forced null when calibration alone runs, so read it with
     # calibration off — otherwise the writer legitimately drops the value under test.
     cfg["rnacalibrate"]["calibration_variant"] = "off"
     cfg[block].update(OFF_DEFAULT[block])
@@ -222,11 +225,156 @@ def test_config_blocks_round_trip_off_default_values(block):
     assert out["obj"][block] == cfg[block]
 
 
+def _run_jsx(payload):
+    # One scenario of _jsx_harness.js against the shipped UI/ tree; returns its JSON result.
+    result = subprocess.run(
+        [NODE, str(JSX_HARNESS), str(ROOT / "UI")],
+        input=json.dumps(payload), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, (
+        f"node jsx harness exited {result.returncode}; stderr:\n{result.stderr}"
+    )
+    return json.loads(result.stdout)
+
+
+def _type_into(section, field, raw, typed):
+    return _run_jsx({"scenario": "field", "section": section, "raw": raw,
+                     "field": field, "typed": typed})
+
+
+@needs_node
+def test_distribution_pair_keeps_float_xi_theta():
+    # -d takes the Gumbel location and scale, both floats. The pair inputs once ran
+    # parseInt, so typing theta 0.29 stored 0 and Save wrote `-d 1,0`.
+    cfg = _shipped_config()
+    cfg["rnacalibrate"]["calibration_variant"] = "off"
+    cfg["rnahybrid"]["distribution"] = "3,4"
+    out = _type_into("RNAHybridSection", "Distribution", cfg, [["a", "1.85"], ["b", "0.29"]])
+    assert out["obj"]["rnahybrid"]["distribution"] == "1.85,0.29"
+    assert out["props"]["pairLabels"] == ["xi", "theta"]
+    assert "xi,theta" in out["props"]["doc"]
+    assert [i["step"] for i in out["inputs"]] == ["any", "any"]
+
+
+@needs_node
+@pytest.mark.parametrize("partial", ["1e", ".", "-"])
+def test_distribution_pair_ignores_partial_float_input(partial):
+    # Mid-keystroke text is not a number; storing it would save `NaN,0.29` or `-,0.29`.
+    cfg = _shipped_config()
+    cfg["rnacalibrate"]["calibration_variant"] = "off"
+    cfg["rnahybrid"]["distribution"] = "1.85,0.29"
+    out = _type_into("RNAHybridSection", "Distribution", cfg, [["a", partial]])
+    assert out["obj"]["rnahybrid"]["distribution"] == "1.85,0.29"
+
+
+@needs_node
+def test_seed_pair_stays_integer():
+    # The float fix must not loosen the integer pairs: a seed is a nucleotide range.
+    cfg = _shipped_config()
+    cfg["seed"] = "2,7"
+    out = _type_into("SharedParamsSection", "Seed", cfg, [["a", "3.5"]])
+    assert out["obj"]["seed"] == "3,7"
+    assert [i["step"] for i in out["inputs"]] == ["1", "1"]
+
+
+@needs_node
+@pytest.mark.parametrize("variant, written", [
+    ("on", None), ("both", "1.85,0.29"), ("off", "1.85,0.29"),
+])
+def test_distribution_is_dropped_only_when_calibration_alone_runs(variant, written):
+    # Under "both" the wo_calibration arm still runs RNAhybrid on the static distribution
+    # (or species), so nulling it there silently swapped that arm onto the species model.
+    cfg = _shipped_config()
+    cfg["rnacalibrate"]["calibration_variant"] = variant
+    cfg["rnahybrid"]["distribution"] = "1.85,0.29"
+    out = _run_js_roundtrip(cfg)
+    assert out["obj"]["rnahybrid"]["distribution"] == written
+
+
+@needs_node
+@pytest.mark.parametrize("variant, locked", [("on", True), ("both", False), ("off", False)])
+def test_species_and_distribution_lock_only_when_calibration_alone_runs(variant, locked):
+    cfg = _shipped_config()
+    cfg["rnacalibrate"]["calibration_variant"] = variant
+    out = _type_into("RNAHybridSection", "Distribution", cfg, [])
+    assert out["hasSelect"] is not locked          # the species picker
+    assert out["props"]["forcedNull"] is locked
+    assert ("overridden" in out["sectionText"]) is locked
+
+
+@needs_node
+def test_optional_param_count_includes_distribution_under_both():
+    # The Hero meter drops the distribution only where it is locked.
+    totals = {}
+    for variant in ("on", "both"):
+        cfg = _shipped_config()
+        cfg["rnacalibrate"]["calibration_variant"] = variant
+        totals[variant] = _run_js_roundtrip(cfg)["optional"]["total"]
+    assert totals["both"] == totals["on"] + 1
+
+
+# What a failed load_config looks like from the JS side: config_io's parse-error and
+# missing/unreadable/empty results, a bridge that rejects, and one that never answers.
+FAILED_LOADS = {
+    "parse_error": {"__error__": "mapping values are not allowed here"},
+    "empty": {},
+    "bridge_rejects": {"__throw__": "bridge down"},
+    "still_loading": {"__pending__": True},
+}
+
+
+@needs_node
+@pytest.mark.parametrize("load", FAILED_LOADS.values(), ids=FAILED_LOADS.keys())
+def test_app_never_writes_defaults_over_an_unloaded_config(load):
+    # Save and Run both rebuild config.yaml whole from form state. Before a load succeeds
+    # that state is INITIAL_CONFIG, so writing it would wipe queries/targets and tuning.
+    out = _run_jsx({"scenario": "app", "loads": [load], "actions": ["save", "run"]})
+    assert out["saveCalls"] == []
+    assert out["runCalls"] == []
+
+
+@needs_node
+@pytest.mark.parametrize("name", ["parse_error", "empty", "bridge_rejects"])
+def test_failed_load_is_shown_until_reloaded(name):
+    out = _run_jsx({"scenario": "app", "loads": [FAILED_LOADS[name]], "actions": []})
+    assert "Reload" in out["text"]
+    if name == "parse_error":
+        assert FAILED_LOADS[name]["__error__"] in out["text"]
+
+
+@needs_node
+def test_app_writes_once_the_config_has_loaded():
+    cfg = _shipped_config()
+    out = _run_jsx({"scenario": "app", "loads": [cfg], "actions": ["save"]})
+    assert [obj["queries"] for obj in out["saveCalls"]] == [cfg["queries"]]
+    assert "Reload" not in out["text"]
+
+
+@needs_node
+def test_reload_after_a_failed_load_unblocks_writes():
+    cfg = _shipped_config()
+    out = _run_jsx({"scenario": "app", "loads": [FAILED_LOADS["parse_error"], cfg],
+                    "actions": ["save", "reload", "save"]})
+    assert out["loadCalls"] == 2
+    assert [obj["queries"] for obj in out["saveCalls"]] == [cfg["queries"]]
+    assert "Reload" not in out["text"]
+
+
+@needs_node
+def test_app_loads_when_the_bridge_methods_arrive_after_mount():
+    # pywebview injects `api: {}` and its methods in two run_js calls. Mounting between them
+    # must still load on pywebviewready, or writes stay blocked with no banner to reload from.
+    cfg = _shipped_config()
+    out = _run_jsx({"scenario": "app", "bridge": "late", "loads": [cfg], "actions": ["save"]})
+    assert out["loadCalls"] == 1
+    assert [obj["queries"] for obj in out["saveCalls"]] == [cfg["queries"]]
+
+
 def test_shipped_length_anchors_are_the_validated_ladder():
     # Seven cells, six fits: anchors above FIT_CEILING_NT are declared so the long tail
     # gets its own cell, then extrapolated rather than fitted.
     import _rnacalibrate_config as rcc
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     anchors = rcc.parse_anchors(cfg["rnacalibrate"]["length_anchors"])
     assert anchors == rcc.DEFAULT_LENGTH_ANCHORS
     assert len(rcc.fitted_anchors(anchors)) == 6
@@ -283,7 +431,7 @@ def test_js_output_columns_default_matches_config_yaml():
     # columns — depend on that list, so the two must agree or the first save breaks the arm.
     match = re.search(r'INTARNA_OUTPUT_COLUMNS_DEFAULT\s*=\s*\n?\s*"([^"]+)"', _data_js_source())
     assert match, "could not locate INTARNA_OUTPUT_COLUMNS_DEFAULT in data.js"
-    cfg = yaml.safe_load((ROOT / "Config" / "config.yaml").read_text())
+    cfg = _shipped_config()
     assert match.group(1) == cfg["intarna"]["output"]["columns"]
 
 

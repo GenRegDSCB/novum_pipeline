@@ -36,8 +36,7 @@ def _record_length(record):
 #----- Chunks of bounded line count, never breaking a record. With `anchors`, records group
 #      by length cell first so a chunk carries one cell's -d xi,theta. Returns
 #      (chunk_path, anchor); anchor is None on the broadcast path -----#
-def write_fasta_chunks(target_file, chunk_dir, chunk_prefix="chunk_", max_lines=800,
-                       anchors=None):
+def write_fasta_chunks(target_file, chunk_dir, max_lines=800, anchors=None):
     chunk_dir = Path(chunk_dir)
     chunk_dir.mkdir(parents=True, exist_ok=True)
 
@@ -50,7 +49,7 @@ def write_fasta_chunks(target_file, chunk_dir, chunk_prefix="chunk_", max_lines=
             return
         # Zero-padded AND globally numbered so merge_output_files' sorted(glob) stays
         # numeric (chunk_10 before chunk_9). Restarting the counter per cell breaks it.
-        chunk_path = chunk_dir / f"{chunk_prefix}{len(chunks):06d}"
+        chunk_path = chunk_dir / f"chunk_{len(chunks):06d}"
         chunk_path.write_text("".join(buffered))
         chunks.append((chunk_path, anchor))
         buffered.clear()

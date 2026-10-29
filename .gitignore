@@ -20,6 +20,7 @@ Data/Raw/RNAs/*
 Data/Results/*
 Data/Analysis*
 Data/fixed_pvalue_analysis
+Data/pre_ladder_calibration_baseline
 
 data-prep/our_data
 data-prep/validated_data
@@ -27,4 +28,4 @@ data-prep/validated_data
 # Files
 IntaRNA_*md
 *.pdf
-Workflow/Legacy_scripts/generate_results*
+Workflow/Legacy_scripts/
