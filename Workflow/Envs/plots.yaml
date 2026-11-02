@@ -2,10 +2,10 @@ name: plots
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 dependencies:
-  - r-base=4.4
-  - r-tidyverse=2.0
-  - r-ggpubr=0.6
-  - r-patchwork=1.3
-  - r-scales=1.3
+  - r-base=4.4.3
+  - r-tidyverse=2.0.0
+  - r-ggpubr=0.6.3
+  - r-patchwork=1.3.2
+  - r-scales=1.3.0

@@ -52,6 +52,41 @@ def test_report_rna_status_defaults_to_dash_for_unresolved_taxon():
     assert row[1] == "no_assembly" and row[5] == "-"
 
 
+def test_report_creates_its_missing_parent_folder():
+    path = os.path.join(tempfile.mkdtemp(), "data-prep", "prep_report.tsv")
+    _write_report(path, groups={"ecoli": ["hsa-miR-1"]}, genome_paths={}, hits_by_taxon={},
+                  per_mirna={("ecoli", "hsa-miR-1"): ("ok", "hsa-miR-1")}, rna_status={})
+    assert Path(path).read_text().startswith("TAXON\t")
+
+
+def test_a_missing_config_fails_before_any_download():
+    d = Path(tempfile.mkdtemp())
+    network = AssertionError("touched the network before checking the config")
+    with mock.patch.object(prepare_inputs, "session_from_env", side_effect=network):
+        try:
+            prepare_inputs.run(inline=["ecoli:hsa-miR-1"], config=str(d / "config.yaml"),
+                               report=str(d / "report.tsv"))
+        except SystemExit as e:
+            assert "config.yaml" in str(e.code)
+        else:
+            raise AssertionError("run() went ahead without a config")
+    assert list(d.iterdir()) == []
+
+
+def test_a_config_without_writable_blocks_fails_before_any_download():
+    d = Path(tempfile.mkdtemp())
+    (d / "config.yaml").write_text("queries: {}\ntargets: {}\n")   # how the editor saves no rows
+    network = AssertionError("touched the network before checking the config")
+    with mock.patch.object(prepare_inputs, "session_from_env", side_effect=network):
+        try:
+            prepare_inputs.run(inline=["ecoli:hsa-miR-1"], config=str(d / "config.yaml"),
+                               report=str(d / "report.tsv"))
+        except SystemExit as e:
+            assert "queries:" in str(e.code)
+        else:
+            raise AssertionError("run() went ahead with an unwritable config")
+
+
 def test_failed_accession_pin_is_labelled_bad_accession():
     # Both fail to resolve, but for different reasons: NCBI has no genome for the
     # organism vs. the accession does not exist. Collapsing them into one status

@@ -2,9 +2,9 @@ name: rnahybrid
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 dependencies:
-  - python=3.11
-  - rnahybrid=2.1
+  - python=3.11.18
+  - rnahybrid=2.1.2
   - parallel=20240722
   - libfaketime=0.9.8

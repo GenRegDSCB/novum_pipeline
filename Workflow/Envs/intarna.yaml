@@ -2,7 +2,7 @@ name: intarna
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 dependencies:
-  - python=3.11
+  - python=3.11.17
   - intarna=3.4.1

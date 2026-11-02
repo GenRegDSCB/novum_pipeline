@@ -1,0 +1,8 @@
+name: snakemake-modern
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11.15
+  - snakemake=9.17.2

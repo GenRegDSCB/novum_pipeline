@@ -11,7 +11,7 @@ import pairs as pairs_mod
 from fetch_genomes import session_from_env, resolve_assemblies, download_targets, target_dest
 from mirnas import (ensure_mature_fa, index_mature, resolve_mirna, write_query_fasta,
                     query_fasta_path, DEFAULT_PREFIX_CHAIN, MatureUnavailable)
-from config_writer import update_path_blocks
+from config_writer import path_blocks_text, update_path_blocks
 
 # One spelling of each path default, shared by run() and the CLI.
 DEFAULT_CONFIG = "Config/config.yaml"
@@ -54,6 +54,7 @@ def select_emitted(taxa_order, genome_paths, mirna_resolved, rnas_dir, hits, loo
 
 #----- Writes the per-(taxon,miRNA) TSV audit report; RNA_STATUS follows GENOME_PATH -----#
 def _write_report(path, groups, genome_paths, hits_by_taxon, per_mirna, rna_status, lookup_errors=()):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)   # a Docker /work is rarely a clone: no data-prep/
     with open(path, "w") as fh:
         fh.write("TAXON\tGENOME_STATUS\tACCESSION\tASSEMBLY_NAME\tGENOME_PATH\tRNA_STATUS\t"
                  "MIRNA_INPUT\tMIRNA_STATUS\tMIRNA_RESOLVED\n")
@@ -84,6 +85,15 @@ def run(pairs_path=None, inline=None, config=DEFAULT_CONFIG,
     if not groups:
         print("No valid pairs. Nothing to do.")
         return
+    # Before any download: the run ends by rewriting this file's queries:/targets: blocks
+    if not dry_run:
+        try:
+            path_blocks_text(config, {}, {})
+        except FileNotFoundError:
+            raise SystemExit(f"ERROR: {config} not found. Run from the project folder, or create "
+                             "the config first (with Docker: the init command).")
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"ERROR: cannot write the inputs into {config}: {e}")
 
     session, delay = session_from_env()
 

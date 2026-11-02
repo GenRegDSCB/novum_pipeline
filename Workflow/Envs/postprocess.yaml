@@ -2,8 +2,8 @@ name: postprocess
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  - nodefaults
 dependencies:
-  - python=3.11
-  - pandas=3.0
-  - numpy
+  - python=3.11.18
+  - pandas=3.0.6
+  - numpy=2.4.6

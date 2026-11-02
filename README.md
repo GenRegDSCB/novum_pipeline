@@ -8,39 +8,98 @@ Start with [Installation](#installation) and the [Quick start](#quick-start). [H
 
 ## Installation
 
-You install **conda** and **Snakemake** yourself. On the first run, Snakemake installs everything else (RNAhybrid, IntaRNA, the Python and R post-processing) into one conda environment per step. Commands assume bash.
+There are two ways to install. The **simple way** is Docker: one image holds Snakemake and every tool, and runs the same on Linux, WSL and Macs. The **direct way** installs everything with conda, and is the one the config editor needs. Commands assume bash.
 
-### Conda
+### Simple way: Docker
 
-Skip this if you already have conda.
+1. **Install Docker:** [Docker Desktop](https://docs.docker.com/desktop/) on a Mac, [Docker Engine](https://docs.docker.com/engine/install/) on Linux. In WSL, use Docker Engine inside WSL or Docker Desktop with WSL integration.
+
+2. **Pull the image:**
+
+   ```bash
+   docker pull --platform linux/amd64 albertosola/novum_pipeline:v1.0.0
+   ```
+
+   The image is built for Intel/AMD processors, because RNAhybrid has no ARM build. Apple Silicon Macs run it through Rosetta automatically. It is slower than on Intel, as the direct way is on those Macs.
+
+3. **Make a project folder.** A clone of this repository works as one. Alternatively, start from an empty folder and let the image write a starter `Config/config.yaml`:
+
+   ```bash
+   mkdir my_project && cd my_project
+   docker run --rm --platform linux/amd64 -u "$(id -u):$(id -g)" -v "$PWD":/work albertosola/novum_pipeline:v1.0.0 init
+   ```
+
+   The container sees only the project folder, so keep your FASTAs inside it, for example under `Data/Raw/`.
+
+4. **Run**, from the project folder:
+
+   ```bash
+   docker run --rm -it --platform linux/amd64 -u "$(id -u):$(id -g)" -v "$PWD":/work albertosola/novum_pipeline:v1.0.0 --cores 8
+   ```
+
+   Everything after the image name goes to Snakemake. Add `-n` for a dry run.
+
+   To run one sample, name its four final files ([Outputs](#outputs)). With `results_dir: Data/Results/`, which is what `init` writes:
+
+   ```bash
+   docker run --rm -it --platform linux/amd64 -u "$(id -u):$(id -g)" -v "$PWD":/work albertosola/novum_pipeline:v1.0.0 --cores 8 \
+     Data/Results/<sample>/{w_calibration,wo_calibration}/rnahybrid_enhanced.txt \
+     Data/Results/<sample>/w_accessibility/intarna_enhanced.txt \
+     Data/Results/<sample>/consensus/consensus_enhanced.txt
+   ```
+
+   To run the [input bootstrap](#preparing-inputs-automatically) instead, put `prepare-inputs` after the image name, e.g. `… v1.0.0 prepare-inputs --pairs pairs.txt`.
+
+   For long runs, replace `--rm -it` with `-d --name novum`, then follow the run with `docker logs -f novum`.
+
+**CPUs and memory.**
+- **Linux and WSL:** a container can use every core and all memory, within WSL's own limits in `.wslconfig`.
+- **Docker Desktop on a Mac:** it uses all cores and half the memory by default. For large panels, raise the memory under Settings → Resources; the RNAhybrid arm has needed about 12 GB.
+- Pass `--cores N` rather than `--cores all`.
+
+**Clusters** without Docker usually have Apptainer, which runs the same image. Pull it once on a node with internet access, then run it from the project folder:
 
 ```bash
-# Linux
-wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash Miniconda3-latest-Linux-x86_64.sh
+apptainer pull novum.sif docker://albertosola/novum_pipeline:v1.0.0
+apptainer run --cleanenv --bind "$PWD":/work --pwd /work novum.sif --cores 8
+```
 
-# macOS (Apple Silicon)
-curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh
-bash Miniconda3-latest-MacOSX-arm64.sh
+`--cleanenv` keeps your shell's variables, such as `PYTHONPATH`, out of the pipeline's environments.
 
-# Then, on every platform:
-source ~/miniconda3/bin/activate
-conda config --add channels defaults
-conda config --add channels bioconda
-conda config --add channels conda-forge
+**Versions.** Image `vX.Y.Z` is built from git tag `vX.Y.Z`, and `latest` is the newest.
+
+### Direct way: conda
+
+You install **conda** and **Snakemake** yourself. On the first run, Snakemake installs everything else (RNAhybrid, IntaRNA, the Python and R post-processing) into one conda environment per step.
+
+#### Conda
+
+Skip this if you already have conda. [Miniforge](https://github.com/conda-forge/miniforge) is conda set up for conda-forge:
+
+```bash
+curl -LO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+bash Miniforge3-$(uname)-$(uname -m).sh
+source ~/miniforge3/bin/activate
 conda config --set channel_priority strict
 ```
 
-### Snakemake
+Miniconda and Anaconda also work once you accept Anaconda's terms for their `defaults` channels. Otherwise Snakemake cannot build the environments, even though they do not use `defaults`:
 
 ```bash
-conda create -n snakemake-modern python=3.11 snakemake
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+```
+
+#### Snakemake
+
+```bash
+conda env update -f Workflow/Envs/environment.yaml --prune
 conda activate snakemake-modern
 ```
 
-Use the full `snakemake` package: it also installs pandas, which the unit tests need. `snakemake-minimal` does not.
+The first command creates the environment, or resets an existing one to the file. To update it later, run it without `--prune`, which would also remove the config editor and `pytest`. It pins Snakemake 9.17.2, as the full `snakemake` package, which also installs pandas for the unit tests; `snakemake-minimal` does not.
 
-### Apple Silicon Macs
+#### Apple Silicon Macs
 
 RNAhybrid and libfaketime have no `osx-arm64` conda builds, so on M-series Macs every pipeline environment must be built as `osx-64` (Intel) and run under Rosetta 2. Skip this on Linux and Intel Macs.
 
@@ -60,7 +119,7 @@ RNAhybrid and libfaketime have no `osx-arm64` conda builds, so on M-series Macs 
 
 The first run builds the Intel environments and takes longer. `setup-macos.sh` tries to automate both steps, but on a real M-series Mac it failed: it runs the Rosetta installer without `sudo`, and the `subdir` setting it writes did not reach the environments Snakemake builds. Use the two steps above.
 
-### Config editor (optional)
+#### Config editor (optional)
 
 A small desktop app can edit `Config/config.yaml` and start runs. To use it, add its GUI libraries to the same environment:
 
@@ -68,6 +127,12 @@ A small desktop app can edit `Config/config.yaml` and start runs. To use it, add
 conda install -c conda-forge pyqt pyqtwebengine
 pip install pywebview
 ```
+
+### Results made before v1.0.0
+
+This applies to both ways. Snakemake ties every result to the exact environment that made it. The environments are pinned since v1.0.0, so a results folder made before it is rerun from the start, calibration included. A folder made by the other install route is rerun too.
+
+To keep such a folder as it is, add `--rerun-triggers mtime params input code` at the end of the command, after any output files. Placed before them, the flag takes their names as trigger values and fails.
 
 ## Quick start
 
@@ -94,6 +159,8 @@ With `snakemake-modern` active:
 
 3. **Read the results** in `<results_dir>/<sample>/`. `results_dir` defaults to `Data/Results`. See [Outputs](#outputs).
 
+**With Docker**, follow the same steps from your project folder. In step 2, use the `docker run` line from [Simple way: Docker](#simple-way-docker) in place of `snakemake --use-conda`. The environments are already in the image, so the first run is not slower.
+
 ### Config editor
 
 ```bash
@@ -113,7 +180,17 @@ conda install pytest
 pytest data-prep/tests Workflow/Scripts/tests UI/tests
 ```
 
-In the bare environment 16 tests fail, because they call the IntaRNA, RNAcalibrate and libfaketime binaries. The UI tests are skipped unless `node` is on `PATH`. With the rule environments' binaries and `node` on `PATH`, all 484 pass.
+In the bare environment 16 tests fail, because they call the IntaRNA, RNAcalibrate and libfaketime binaries. The UI tests are skipped unless `node` is on `PATH`. With the rule environments' binaries and `node` on `PATH`, all 487 pass.
+
+With Docker, you can run the two Python suites against the image's own binaries. Build the test stage from a clone:
+
+```bash
+docker build --platform linux/amd64 --target test -t novum:test .
+mkdir -p Data/Raw
+docker run --rm -v "$PWD/Data/Raw":/work/Data/Raw:ro novum:test
+```
+
+All 413 pass. Two of them need the E. coli genome under `Data/Raw/genomes/`, and are skipped without it.
 
 ## Outputs
 
@@ -362,11 +439,11 @@ With both calibration variants, panels show the two side by side.
 Two prediction arms run from the same inputs, and the consensus combines them. The Snakefile defines the exact rule graph; the scripts live in `Workflow/Scripts/`.
 
 ```text
-                    ┌ (RNAcalibrate) → RNAhybrid → tidy → annotate → enhance
-                    │                                         │  └────────→ plots (optional)
-queries + targets ──┤                                         ├→ intersect → enhance   (consensus)
+                    ┌ (RNAcalibrate) ── RNAhybrid ── tidy ── annotate ── enhance
                     │                                         │
-                    └ IntaRNA ─────────────────────→ tidy → annotate → enhance
+queries + targets ──┤                                         ├── intersect ── enhance (consensus)
+                    │                                         │
+                    └ IntaRNA ────────────────────── tidy ── annotate ── enhance
 ```
 
 ### RNAhybrid arm
@@ -398,12 +475,9 @@ queries + targets ──┤                                         ├→ inter
 
 If you use this workflow in a publication, please cite this repository and the external tools it relies on:
 
-- **RNAhybrid / RNAcalibrate**: Rehmsmeier, M., Steffen, P., Höchsmann, M., and Giegerich, R. (2004). Fast and effective prediction of microRNA/target duplexes. *RNA*, 10(10), 1507–1517. https://doi.org/10.1261/rna.5248604
-- **RNAhybrid (web server)**: Krüger, J. and Rehmsmeier, M. (2006). RNAhybrid: microRNA target prediction easy, fast and flexible. *Nucleic Acids Research*, 34(Web Server issue), W451–W454. https://doi.org/10.1093/nar/gkl243
+- **RNAhybrid**: Rehmsmeier, M., Steffen, P., Höchsmann, M., and Giegerich, R. (2004). Fast and effective prediction of microRNA/target duplexes. *RNA*, 10(10), 1507–1517. https://doi.org/10.1261/rna.5248604
 - **IntaRNA**:
   - Mann, M., Wright, P. R., and Backofen, R. (2017). IntaRNA 2.0: enhanced and customizable prediction of RNA–RNA interactions. *Nucleic Acids Research*, 45(W1), W435–W439. https://doi.org/10.1093/nar/gkx279
-  - Wright, P. R., Georg, J., Mann, M., Sorescu, D. A., Richter, A. S., Lott, S., Kleinkauf, R., Hess, W. R., and Backofen, R. (2014). CopraRNA and IntaRNA: predicting small RNA targets, networks and interaction domains. *Nucleic Acids Research*, 42(W1), W119–W123. https://doi.org/10.1093/nar/gku359
   - Busch, A., Richter, A. S., and Backofen, R. (2008). IntaRNA: efficient prediction of bacterial sRNA targets incorporating target site accessibility and seed regions. *Bioinformatics*, 24(24), 2849–2856. https://doi.org/10.1093/bioinformatics/btn544
-  - Raden, M., Ali, S. M., Alkhnbashi, O. S., Busch, A., Costa, F., Davis, J. A., Eggenhofer, F., Gelhausen, R., Georg, J., Heyne, S., Hiller, M., Kundu, K., Kleinkauf, R., Lott, S. C., Mohamed, M. M., Mattheis, A., Miladi, M., Richter, A. S., Will, S., Wolff, J., Wright, P. R., and Backofen, R. (2018). Freiburg RNA tools: a central online resource for RNA-focused research and teaching. *Nucleic Acids Research*, 46(W1), W25–W29. https://doi.org/10.1093/nar/gky329
 - **Snakemake**: Mölder, F., Jablonski, K. P., Letcher, B., et al. (2021). Sustainable data analysis with Snakemake. *F1000Research*, 10, 33. https://doi.org/10.12688/f1000research.29032.2
 - **GNU Parallel**: Tange, O. (2011). GNU Parallel: The command-line power tool. *;login: The USENIX Magazine*, 36(1), 42–47.

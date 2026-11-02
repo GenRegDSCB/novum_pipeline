@@ -1,0 +1,11 @@
+# Whitelist: only what the Dockerfile copies
+*
+!Snakefile
+!Config/config.yaml
+!Workflow/Envs
+!Workflow/Scripts
+!data-prep/*.py
+!data-prep/tests
+!docker
+**/__pycache__
+**/.pytest_cache

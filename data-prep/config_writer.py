@@ -51,10 +51,14 @@ def atomic_write(path, data: str | bytes) -> None:
         raise
 
 
-#----- Rewrites queries: and targets: atomically -----#
-def update_path_blocks(config_path, queries: dict[str, str], targets: dict[str, str]) -> None:
-    path = Path(config_path)
-    lines = path.read_text().splitlines()
+#----- The config text with queries: and targets: rewritten; raises before anything is written -----#
+def path_blocks_text(config_path, queries: dict[str, str], targets: dict[str, str]) -> str:
+    lines = Path(config_path).read_text().splitlines()
     lines = replace_block(lines, "queries", queries)
     lines = replace_block(lines, "targets", targets)
-    atomic_write(path, "\n".join(lines) + "\n")
+    return "\n".join(lines) + "\n"
+
+
+#----- Rewrites queries: and targets: atomically -----#
+def update_path_blocks(config_path, queries: dict[str, str], targets: dict[str, str]) -> None:
+    atomic_write(config_path, path_blocks_text(config_path, queries, targets))
