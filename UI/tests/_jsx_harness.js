@@ -101,7 +101,7 @@ function runField(sandbox) {
     props: { name, doc, kind, pairLabels: pairLabels || null, forcedNull: !!forcedNull },
     inputs: inputs().map((e) => ({ step: e.props.step, inputMode: e.props.inputMode })),
     sectionText: text(render()),
-    hasSelect: elements(render()).some((e) => e.type === "select"),
+    hasSelect: elements(render()).some((e) => e.type === sandbox.SelectSubcard),
     obj: sandbox.configToObject(cfg),
   };
 }

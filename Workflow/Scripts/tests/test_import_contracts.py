@@ -4,7 +4,7 @@ Each module runs in a different conda env, so its import list is a contract, not
 preference: the two config modules are imported by the Snakefile into the DRIVER env (a
 third-party import there breaks every snakemake invocation, --dry-run included), and
 _common/_gumbel_fit are imported by scripts running in rnahybrid.yaml, which ships neither
-pandas nor numpy. See CLAUDE.md, "Snakemake script convention".
+pandas nor numpy.
 """
 from __future__ import annotations
 import sys

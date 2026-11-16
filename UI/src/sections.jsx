@@ -115,16 +115,8 @@ function SharedParamsSection({ cfg, setCfg }) {
         </InlineNote>
       )}
       <div className="grid-2">
-        <Subcard label="Threads">
-          <input
-            className="input mono"
-            type="number"
-            min={1}
-            step="1"
-            value={cfg.threads}
-            onChange={(e) => set({ threads: Number(e.target.value) })}
-          />
-        </Subcard>
+        <NumberSubcard label="Threads" min={1} step="1"
+          value={cfg.threads} onChange={(v) => set({ threads: v })} />
         {/* "auto", not "loose": a null here means each arm falls back to its own default. */}
         <NullableField name="Max suboptimal hits" kind="integer"
           min={1} nullHint="null · auto"
@@ -175,26 +167,10 @@ function RNACalibrateSection({ cfg, setCfg }) {
         )}
         <DisableGroup disabled={inert} className="stack lg">
           <div className="grid-2">
-            <Subcard label="k (sample size)">
-              <input
-                className="input mono"
-                type="number"
-                step="1"
-                min={0}
-                value={r.k}
-                onChange={(e) => set({ k: Number(e.target.value) })}
-              />
-            </Subcard>
-            <Subcard label="Maximum target length" hint="nt">
-              <input
-                className="input mono"
-                type="number"
-                step="1"
-                min={0}
-                value={r.max_target_length}
-                onChange={(e) => set({ max_target_length: Number(e.target.value) })}
-              />
-            </Subcard>
+            <NumberSubcard label="k (sample size)" step="1" min={0}
+              value={r.k} onChange={(v) => set({ k: v })} />
+            <NumberSubcard label="Maximum target length" hint="nt" step="1" min={0}
+              value={r.max_target_length} onChange={(v) => set({ max_target_length: v })} />
           </div>
           <Subcard
             label="Randomize targets"
@@ -249,17 +225,8 @@ function RNAHybridSection({ cfg, setCfg }) {
             </div>
           </Subcard>
         ) : (
-          <Subcard label="Species model" hint={`3′UTR distribution${armNote}`}>
-            <select
-              className="select"
-              value={r.species}
-              onChange={(e) => set({ species: e.target.value })}
-            >
-              {window.SPECIES_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </Subcard>
+          <SelectSubcard label="Species model" hint={`3′UTR distribution${armNote}`} options={window.SPECIES_OPTIONS}
+            value={r.species} onChange={(v) => set({ species: v })} />
         )}
 
         <div className="grid-2">
@@ -339,39 +306,12 @@ function IntaRNASection({ cfg, setCfg }) {
         </Subcard>
 
         <div className="grid-2">
-          <Subcard label="Prediction mode">
-            <select
-              className="select"
-              value={it.prediction_mode}
-              onChange={(e) => set({ prediction_mode: e.target.value })}
-            >
-              {window.INTARNA_PREDICTION_MODES.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </Subcard>
-          <Subcard label="Interaction model">
-            <select
-              className="select"
-              value={it.model}
-              onChange={(e) => set({ model: e.target.value })}
-            >
-              {window.INTARNA_MODELS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </Subcard>
-          <Subcard label="Energy set" hint="Nearest-Neighbor table">
-            <select
-              className="select"
-              value={it.energy_set}
-              onChange={(e) => set({ energy_set: e.target.value })}
-            >
-              {window.INTARNA_ENERGY_SETS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </Subcard>
+          <SelectSubcard label="Prediction mode" options={window.INTARNA_PREDICTION_MODES}
+            value={it.prediction_mode} onChange={(v) => set({ prediction_mode: v })} />
+          <SelectSubcard label="Interaction model" options={window.INTARNA_MODELS}
+            value={it.model} onChange={(v) => set({ model: v })} />
+          <SelectSubcard label="Energy set" hint="Nearest-Neighbor table" options={window.INTARNA_ENERGY_SETS}
+            value={it.energy_set} onChange={(v) => set({ energy_set: v })} />
           <NullableField name="Max hybridization energy" doc="kcal/mol · E_hybrid"
             max={0} nullHint="null · tool default (E ≤ 0)"
             value={it.max_hybrid_energy}
@@ -534,17 +474,8 @@ function IntaRNASection({ cfg, setCfg }) {
             <NullableField name="Max ΔE" doc="cap vs MFE"
               min={0}
               value={it.output.max_delta_energy} onChange={(v) => setOut({ max_delta_energy: v })} />
-            <Subcard label="Overlap">
-              <select
-                className="select"
-                value={it.output.overlap}
-                onChange={(e) => setOut({ overlap: e.target.value })}
-              >
-                {window.INTARNA_OVERLAPS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Subcard>
+            <SelectSubcard label="Overlap" options={window.INTARNA_OVERLAPS}
+              value={it.output.overlap} onChange={(v) => setOut({ overlap: v })} />
             <NullableField name="Min unpaired probability" doc="[0..1]"
               min={0} max={1}
               value={it.output.min_unpaired_probability} onChange={(v) => setOut({ min_unpaired_probability: v })} />
@@ -564,7 +495,7 @@ function PlotsSection({ cfg, setCfg }) {
   const pl = cfg.plots;
   const set = (patch) => setCfg({ ...cfg, plots: { ...pl, ...patch } });
   const enabled = pl.types.length > 0;
-  const setEnabled = (v) => set({ types: v ? window.PLOT_TYPES.map((p) => p.value) : [] });
+  const setEnabled = (v) => set({ types: v ? window.PLOT_TYPE_VALUES.slice() : [] });
   const toggleType = (val) => {
     set({ types: pl.types.includes(val) ? pl.types.filter((t) => t !== val) : [...pl.types, val] });
   };
@@ -607,36 +538,12 @@ function PlotsSection({ cfg, setCfg }) {
           ))}
         </PillGroup>
         <div className="grid-3">
-          <Subcard label="Base font size">
-            <input
-              className="input mono"
-              type="number"
-              step="1"
-              min={0}
-              value={pl.basesize}
-              onChange={(e) => set({ basesize: Number(e.target.value) })}
-            />
-          </Subcard>
-          <Subcard label="p-value threshold" hint="0 – 1">
-            <input
-              className="input mono"
-              type="number"
-              step="0.001"
-              min={0}
-              value={pl.pvalue_threshold}
-              onChange={(e) => set({ pvalue_threshold: Number(e.target.value) })}
-            />
-          </Subcard>
-          <Subcard label="Top-N miRNAs" hint="per-miRNA plot cap">
-            <input
-              className="input mono"
-              type="number"
-              min={1}
-              step="1"
-              value={pl.per_mirna_top_n}
-              onChange={(e) => set({ per_mirna_top_n: Number(e.target.value) })}
-            />
-          </Subcard>
+          <NumberSubcard label="Base font size" step="1" min={0}
+            value={pl.basesize} onChange={(v) => set({ basesize: v })} />
+          <NumberSubcard label="p-value threshold" hint="0 – 1" step="0.001" min={0}
+            value={pl.pvalue_threshold} onChange={(v) => set({ pvalue_threshold: v })} />
+          <NumberSubcard label="Top-N miRNAs" hint="per-miRNA plot cap" min={1} step="1"
+            value={pl.per_mirna_top_n} onChange={(v) => set({ per_mirna_top_n: v })} />
         </div>
 
         {window.PLOT_PAIR_LISTS.map((spec) => (

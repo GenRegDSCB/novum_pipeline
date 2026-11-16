@@ -77,7 +77,7 @@ class API:
     def list_targets(self) -> list[dict]:
         return _list_dir(TARGETS_DIR)
 
-    #----- config save -----#
+    #----- config load and save -----#
 
     def load_config(self) -> dict:
         return _load_config(CONFIG_PATH)
@@ -95,10 +95,9 @@ class API:
     def _is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
-    #----- Last `max_lines` of the run log, so a failure can be read in-app instead of
-    #      sending the user back to the launcher terminal. Only the final `max_bytes` are
-    #      read, so a long run's log is never slurped whole; the leading partial line is
-    #      dropped by the line slice -----#
+    #----- Last `max_lines` of the run log, so a failure can be read in-app. Only the final
+    #      `max_bytes` are read, so a long run's log is never slurped whole; the line slice
+    #      drops the leading partial line -----#
     @staticmethod
     def _read_log_tail(max_lines: int = 80, max_bytes: int = 65536) -> str:
         try:

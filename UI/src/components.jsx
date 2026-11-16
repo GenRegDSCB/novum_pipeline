@@ -36,6 +36,29 @@ function Subcard({ label, hint, right, locked = false, children }) {
   );
 }
 
+//----- Subcard holding one <select> over a list of {value, label} options -----//
+function SelectSubcard({ label, hint, options, value, onChange }) {
+  return (
+    <Subcard label={label} hint={hint}>
+      <select className="select" value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </Subcard>
+  );
+}
+
+//----- Subcard holding one number input; `attrs` carries its min and step -----//
+function NumberSubcard({ label, hint, value, onChange, ...attrs }) {
+  return (
+    <Subcard label={label} hint={hint}>
+      <input className="input mono" type="number" {...attrs} value={value}
+             onChange={(e) => onChange(Number(e.target.value))} />
+    </Subcard>
+  );
+}
+
 //----- Subcard whose body is a flex-wrap row of PillToggles. Used for the three IntaRNA
 //      "Constraints" blocks and the Plots type selector -----//
 function PillGroup({ label, hint, children }) {
@@ -856,7 +879,7 @@ function YAMLDrawer({ open, onClose, cfg, onSave }) {
 //----- Publish to window for the other scripts. Each <script type="text/babel"> is
 //      transpiled into its OWN scope, so nothing here is global until it is listed -----//
 Object.assign(window, {
-  Toggle, Subcard, PillGroup, PillToggle, SegmentedControl, DisableGroup, InlineNote, ErrorBoundary,
+  Toggle, Subcard, SelectSubcard, NumberSubcard, PillGroup, PillToggle, SegmentedControl, DisableGroup, InlineNote, ErrorBoundary,
   PathInput, KeyedFileRow, PairListEditor, keyedRowClass,
   FolderIcon, PlusIcon, TrashIcon, CodeIcon, PlayIcon, SaveIcon, SunIcon, MoonIcon, CopyIcon,
   CheckIcon, XIcon, StopIcon,

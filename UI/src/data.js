@@ -363,7 +363,7 @@ window.INITIAL_CONFIG = {
     }
   },
   plots: {
-    types: window.PLOT_TYPES.map((p) => p.value),
+    types: window.PLOT_TYPE_VALUES.slice(),
     basesize: 12,
     pvalue_threshold: 0.01,
     per_mirna_top_n: 12,

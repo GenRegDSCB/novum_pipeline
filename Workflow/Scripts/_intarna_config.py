@@ -25,7 +25,6 @@ INTARNA_DEFAULT_ACCESSIBILITY_SEARCH_DEPTH = 20
 
 # Median of (IntaRNA E_hybrid - RNAhybrid mfe) over matched, UNFILTERED acc=N hits. It
 # equalizes the gates under acc=N only; never re-derive it from w_accessibility output.
-# See CLAUDE.md "Per-arm energy gates".
 INTARNA_RNAHYBRID_ENERGY_OFFSET = 5.10
 
 # Drift past this trips warning (d). A usability threshold, not a confidence bound — the
@@ -49,11 +48,9 @@ REMOVED_TOP_LEVEL_KEYS = {
 }
 
 
-#----- The only `intarna:` keys build_command reads. Everything else in the block steers a
-#      DOWNSTREAM rule (the tidy gate, the per-side Pu floors) or the DAG itself, and
-#      Snakemake reruns on any change to a rule's params — so handing rule intarna the whole
-#      block makes a tidy_intarna knob invalidate the hour-long arm. Filter through
-#      tool_config() instead; a key added here must be one build_command actually consumes -----#
+#----- The only `intarna:` keys build_command reads; add a key only if it consumes it. The
+#      rest steer downstream rules, and params are a rerun trigger, so rule intarna gets these
+#      alone through tool_config() and a tidy_intarna knob never reruns the hour-long arm -----#
 INTARNA_TOOL_KEYS = (
     "prediction_mode", "model", "energy_set", "max_interaction_length", "max_loop_size",
     "seed", "helix", "accessibility", "output",
@@ -172,10 +169,9 @@ ACCESSIBILITY_WINDOW_CONFLICTS = (
 )
 
 
-#----- (f) IntaRNA aborts on a shared accessibility window set beside a differing per-side one,
-#      rather than letting either win; catch it before the hour-long RNAhybrid arm starts.
-#      Deliberately NOT checked: `*_max_bp_span <= *_window` — IntaRNA already reports that
-#      clearly per side, and a copy here would have to re-derive the side resolution -----#
+#----- (f) IntaRNA aborts on a shared accessibility window set beside a differing per-side
+#      one; catch it before the hour-long RNAhybrid arm starts. `*_max_bp_span <= *_window`
+#      is deliberately NOT checked: IntaRNA already reports that clearly per side -----#
 def _reject_accessibility_conflicts(acc):
     flag_for = dict(ACCESSIBILITY_WINDOW_FLAGS)
     for shared_key, side_key in ACCESSIBILITY_WINDOW_CONFLICTS:

@@ -89,7 +89,7 @@ window.renderYAML = function renderYAML(lines) {
     (k) => `<span class="y-key">${esc(k)}</span>`,
     (kind, v) => {
       if (kind === "bare") return "";
-      if (kind === "null" || v === null || v === undefined) return `<span class="y-null">null</span>`;
+      if (kind === "null") return `<span class="y-null">null</span>`;
       if (kind === "bool") return `<span class="y-bool">${v ? "true" : "false"}</span>`;
       if (kind === "num")  return `<span class="y-num">${esc(v)}</span>`;
       return `<span class="y-str">${esc(v)}</span>`;
@@ -104,7 +104,7 @@ window.renderYAMLPlain = function renderYAMLPlain(lines) {
     (k) => k,
     (kind, v) => {
       if (kind === "bare") return "";
-      if (kind === "null" || v === null || v === undefined) return "null";
+      if (kind === "null") return "null";
       if (kind === "bool") return v ? "true" : "false";
       return String(v);
     },

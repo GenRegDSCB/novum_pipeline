@@ -99,6 +99,3 @@ pre-merge `genomes/` directory without needing `--force`.
   printed), or `-`. A missing RNA set never drops a taxon — it degrades to
   CDS-only and is still written to `config.yaml`.
 - `NCBI_API_KEY` / `NCBI_API_EMAIL` (optional) raise the NCBI rate limit.
-
-See `docs/superpowers/specs/2026-06-30-data-prep-design.md` for the full design,
-and `docs/superpowers/specs/2026-07-23-cds-rna-merge-design.md` for the CDS+RNA merge.

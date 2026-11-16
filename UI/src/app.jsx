@@ -2,10 +2,6 @@
 
 const { useState, useEffect, useRef } = React;
 
-//----- Pipeline lifecycle: idle → running → succeeded | failed | cancelled. A terminal state
-//      stays until the overlay is dismissed, then acknowledge_pipeline resets the backend,
-//      so a fast finish is never missed between two polls -----//
-
 //----- Why a load_config result cannot seed the form, else null. config_io answers {} for a
 //      file it cannot read or that holds no mapping, and {__error__} for unparseable YAML -----//
 function loadFailure(raw) {
@@ -28,6 +24,9 @@ function App() {
   const toastTimer = useRef(null);
 
   const [saving, setSaving] = useState(false);
+  // Pipeline lifecycle: idle → running → succeeded | failed | cancelled. A terminal state
+  // stays until the overlay is dismissed, then acknowledge_pipeline resets the backend,
+  // so a fast finish is never missed between two polls.
   const [pipelineStatus, setPipelineStatus] = useState(null);
 
   const pipelineState = pipelineStatus?.state ?? "idle";

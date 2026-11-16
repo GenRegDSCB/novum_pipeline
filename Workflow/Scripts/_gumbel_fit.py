@@ -8,7 +8,7 @@ anchors. Weights are 1/SE^2 with SE(ln theta) = 1.053/sqrt(N), from the measured
 SE(theta_hat) = 1.053*theta/sqrt(N).
 
 Tier 1 is not heuristic: every condition is a literal branch in RNAcalibrate's
-`numerical.c`. See the `rnacalibrate-fit-window` memory.
+`numerical.c`.
 """
 
 import math

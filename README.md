@@ -121,7 +121,7 @@ RNAhybrid and libfaketime have no `osx-arm64` conda builds, so on M-series Macs 
 
    If you already ran the pipeline without it, delete `.snakemake/conda/` so the environments are rebuilt.
 
-The first run builds the Intel environments and takes longer. Use these two steps rather than `setup-macos.sh`: on an M-series Mac, the script runs the Rosetta installer without `sudo`, and its `subdir` setting does not reach the environments Snakemake builds.
+The first run builds the Intel environments and takes longer.
 
 #### 🖥️ Config editor (optional)
 

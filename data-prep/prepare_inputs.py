@@ -98,10 +98,8 @@ def run(pairs_path=None, inline=None, config=DEFAULT_CONFIG,
     session, delay = session_from_env()
 
     # --- miRNAs ---
-    # Before the genome phase, not after: miRBase is a single un-mirrored server
-    # that is periodically down, and that outage is a SystemExit. Resolving here
-    # costs ~60 ms and fails in seconds; resolving after the downloads means
-    # paying the entire download phase to discover it.
+    # Before the genome phase, not after: a miRBase outage is a SystemExit, and it is
+    # cheaper to hit it here than after the whole download phase.
     print("--- Resolving miRNAs ---")
     # Spec: dry-run "ensures mature.fa (idempotent cache)" — download if absent
     # but never force a re-download during a preview.

@@ -44,10 +44,9 @@ def write_pairs(fh, pairs, row):
         fh.write(f"{column}: {fmt(row[idx])}\n")
 
 
-#----- Resolves each column group to its (name, index) pairs. One report section per group, in
-#      the order given, dropping any group that is absent or holds no value at all: the seed
-#      columns are all-NA under --noSeed, and consensus reindexes them back in even when
-#      IntaRNA never wrote them, so "present" alone would section an empty block -----#
+#----- Resolves each column group to its (name, index) pairs: one report section per group,
+#      in the order given. A group that is absent or all-NA is dropped, since consensus
+#      reindexes the --noSeed seed columns back in as NA -----#
 def column_blocks(annotated, groups):
     blocks = []
     for group in groups:
